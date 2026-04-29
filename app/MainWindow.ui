@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>934</width>
+    <height>597</height>
+   </rect>
+  </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QGridLayout" name="gridLayout_3">
+    <item row="0" column="0">
+     <layout class="QGridLayout" name="gridLayout_2" columnstretch="1,8,1">
+      <item row="0" column="0" colspan="3">
+       <layout class="QHBoxLayout" name="toolbarRow">
+        <item>
+         <widget class="QPushButton" name="openFolderButton">
+          <property name="text">
+           <string>打开文件夹</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="initButton">
+          <property name="text">
+           <string>初始化SAM3</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pushButton_5">
+          <property name="text">
+           <string>转入目录</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_3">
+          <property name="text">
+           <string>标注模式</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="comboBox_AnnoMode">
+          <property name="minimumSize">
+           <size>
+            <width>60</width>
+            <height>0</height>
+           </size>
+          </property>
+          <item>
+           <property name="text">
+            <string>自动</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>手动</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label">
+          <property name="text">
+           <string>当前标签</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="comboBox_CurrentLabel">
+          <property name="minimumSize">
+           <size>
+            <width>120</width>
+            <height>0</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="toolbarSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item row="1" column="0">
+       <widget class="QSplitter" name="splitter">
+        <property name="orientation">
+         <enum>Qt::Vertical</enum>
+        </property>
+        <widget class="QLabel" name="label_2">
+         <property name="text">
+          <string>图片列表</string>
+         </property>
+        </widget>
+        <widget class="QListWidget" name="imageList">
+         <property name="minimumSize">
+          <size>
+           <width>260</width>
+           <height>0</height>
+          </size>
+         </property>
+        </widget>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <layout class="QGridLayout" name="gridLayout">
+        <item row="1" column="1">
+         <widget class="QPushButton" name="PB_LastImg">
+          <property name="text">
+           <string>上一张</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="0" colspan="5">
+         <layout class="QVBoxLayout" name="imageLayout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="ImageAnnotateWidget" name="imageWidget" native="true"/>
+          </item>
+         </layout>
+        </item>
+        <item row="1" column="2">
+         <widget class="QPushButton" name="pushButton_deleteImg">
+          <property name="text">
+           <string>删除图像</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="3">
+         <widget class="QPushButton" name="pushButton_nextImg">
+          <property name="text">
+           <string>下一张</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QPushButton" name="pushButton_firstImg">
+          <property name="text">
+           <string>第一张</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="4">
+         <widget class="QPushButton" name="pushButton_finalImg">
+          <property name="text">
+           <string>最末张</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="1" column="2">
+       <layout class="QVBoxLayout" name="rightLayout">
+        <item>
+         <widget class="QLabel" name="labelTitle">
+          <property name="text">
+           <string>标签列表</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QListWidget" name="labelList"/>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="labelButtonRow">
+          <item>
+           <widget class="QPushButton" name="addLabelButton">
+            <property name="text">
+             <string>添加标签</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="deleteLabelButton">
+            <property name="text">
+             <string>删除标签</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QLabel" name="annTitle">
+          <property name="text">
+           <string>标注列表</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QListWidget" name="annotationList"/>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="annButtonRow">
+          <item>
+           <widget class="QPushButton" name="deleteAnnotationButton">
+            <property name="text">
+             <string>删除标注</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="fixAnnotationButton">
+            <property name="text">
+             <string>修改标签</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_clearAllAnno">
+            <property name="text">
+             <string>全部清除</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ImageAnnotateWidget</class>
+   <extends>QWidget</extends>
+   <header>widgets/ImageAnnotateWidget.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

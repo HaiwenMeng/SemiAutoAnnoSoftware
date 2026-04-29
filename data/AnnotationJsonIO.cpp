@@ -240,6 +240,19 @@ bool AnnotationJsonIO::appendAnnotations(const QString& imagePath, const QList<A
     return saveRootObject(jsonPath, root, errorMessage);
 }
 
+bool AnnotationJsonIO::clearAnnotations(const QString& imagePath, QString* errorMessage) {
+    const QString jsonPath = jsonPathFromImagePath(imagePath);
+
+    QJsonObject root;
+    if (!loadRootObject(jsonPath, imagePath, &root, errorMessage)) {
+        return false;
+    }
+
+    refreshImageFields(&root, imagePath);
+    root.insert(QStringLiteral("shapes"), QJsonArray());
+    return saveRootObject(jsonPath, root, errorMessage);
+}
+
 bool AnnotationJsonIO::removeAnnotationByIndex(const QString& imagePath, int shapeIndex, QString* errorMessage) {
     if (shapeIndex < 0) {
         if (errorMessage) {

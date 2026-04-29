@@ -8,11 +8,11 @@
 #include "app/AppTypes.h"
 #include "inference/SamTypes.h"
 
-class QListWidget;
-class QPushButton;
-
 class SamInferenceBridge;
-class ImageAnnotateWidget;
+
+namespace Ui {
+class MainWindow;
+}
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -29,13 +29,20 @@ private slots:
     void onFixAnnotationClicked();
     void onAddLabelClicked();
     void onDeleteLabelClicked();
+    void onOpenCurrentFolderClicked();
+    void onClearAllAnnotationsClicked();
+    void onFirstImageClicked();
+    void onPreviousImageClicked();
+    void onDeleteCurrentImageClicked();
+    void onNextImageClicked();
+    void onFinalImageClicked();
 
     void onPointPromptRequested(const QPointF& imagePoint);
     void onRectPromptRequested(const QRectF& imageRect);
     void onAnnotationSelectionChanged(int annotationIndex);
 
 private:
-    void setupUi();
+    void setupConnections();
     void appendLog(const QString& message);
 
     void updateWindowTitle();
@@ -50,25 +57,15 @@ private:
     void refreshAnnotationList();
     void updateAnnotationColors();
     int colorForLabel(const QString& label) const;
+    bool isAutoAnnotationMode() const;
+    void clearCurrentImageState();
+    bool saveManualRectAnnotation(const QRectF& imageRect, const QString& labelName);
     QString currentSelectedLabel(QString* errorMessage = nullptr) const;
     QList<AnnotationObject> annotationsFromSamResult(const SamInferResult& result, const QString& labelName,
                                                      QString* errorMessage = nullptr);
     bool saveSamResultAnnotations(const SamInferResult& result, const QString& labelName);
 
-    QListWidget* m_imageList = nullptr;
-    ImageAnnotateWidget* m_imageWidget = nullptr;
-    QListWidget* m_labelList = nullptr;
-    QListWidget* m_annotationList = nullptr;
-
-    QPushButton* m_initButton = nullptr;
-    QPushButton* m_openFolderButton = nullptr;
-
-    QPushButton* m_addLabelButton = nullptr;
-    QPushButton* m_deleteLabelButton = nullptr;
-
-    QPushButton* m_deleteAnnotationButton = nullptr;
-    QPushButton* m_fixAnnotationButton = nullptr;
-
+    Ui::MainWindow* ui = nullptr;
     SamInferenceBridge* m_bridge = nullptr;
 
     QString m_workingDir;

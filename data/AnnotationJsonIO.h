@@ -12,6 +12,7 @@ public:
     static bool appendAnnotation(const QString& imagePath, const AnnotationObject& annotation, QString* errorMessage = nullptr);
     static bool appendAnnotations(const QString& imagePath, const QList<AnnotationObject>& annotations,
                                   QString* errorMessage = nullptr);
+    static bool clearAnnotations(const QString& imagePath, QString* errorMessage = nullptr);
     static bool removeAnnotationByIndex(const QString& imagePath, int shapeIndex, QString* errorMessage = nullptr);
     static bool updateAnnotationByIndex(const QString& imagePath, int shapeIndex, const AnnotationObject& annotation,
                                         QString* errorMessage = nullptr);

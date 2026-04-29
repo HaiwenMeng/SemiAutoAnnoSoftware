@@ -1,22 +1,19 @@
-﻿#include "app/MainWindow.h"
+#include "app/MainWindow.h"
 
 #include <exception>
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QHBoxLayout>
-#include <QLabel>
 #include <QListWidget>
 #include <QListWidgetItem>
-#include <QPushButton>
-#include <QSplitter>
+#include <QMessageBox>
 #include <QStatusBar>
-#include <QSizePolicy>
-#include <QVBoxLayout>
-#include <QWidget>
+#include <QUrl>
+#include <QFile>
 
 #include "data/AnnotationJsonIO.h"
 #include "data/LabelConfigIO.h"
@@ -24,7 +21,7 @@
 #include "dialogs/LabelSelectDialog.h"
 #include "inference/SamInferenceBridge.h"
 #include "inference/SamTypes.h"
-#include "widgets/ImageAnnotateWidget.h"
+#include "ui_MainWindow.h"
 
 namespace {
 QPolygonF toAxisAlignedRectPolygon(const QPolygonF& poly) {
@@ -64,10 +61,16 @@ QPolygonF polygonFromRoiData(const QVector<double>& roiData) {
     }
     return toAxisAlignedRectPolygon(poly);
 }
+
+QString jsonPathFromImagePath(const QString& imagePath) {
+    const QFileInfo info(imagePath);
+    return info.absolutePath() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".json");
+}
 }
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), m_bridge(new SamInferenceBridge()) {
-    setupUi();
+MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow), m_bridge(new SamInferenceBridge()) {
+    ui->setupUi(this);
+    setupConnections();
 
     m_workingDir = QCoreApplication::applicationDirPath();
     setWorkingDirectory(m_workingDir);
@@ -77,6 +80,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), m_bridge(new SamI
 
 MainWindow::~MainWindow() {
     delete m_bridge;
+    delete ui;
 }
 
 void MainWindow::onInitializeBridgeClicked() {
@@ -120,7 +124,7 @@ void MainWindow::onDeleteAnnotationClicked() {
         return;
     }
 
-    const int row = m_annotationList->currentRow();
+    const int row = ui->annotationList->currentRow();
     if (row < 0 || row >= m_annotations.size()) {
         statusBar()->showMessage(QString::fromUtf8(u8"请选择要删除的标注"));
         return;
@@ -144,7 +148,7 @@ void MainWindow::onFixAnnotationClicked() {
         return;
     }
 
-    const int row = m_annotationList->currentRow();
+    const int row = ui->annotationList->currentRow();
     if (row < 0 || row >= m_annotations.size()) {
         statusBar()->showMessage(QString::fromUtf8(u8"请选择要修正的标注"));
         return;
@@ -195,12 +199,12 @@ void MainWindow::onAddLabelClicked() {
     refreshLabelList();
     updateAnnotationColors();
     refreshAnnotationList();
-    m_imageWidget->setAnnotations(m_annotations);
+    ui->imageWidget->setAnnotations(m_annotations);
     statusBar()->showMessage(QString::fromUtf8(u8"标签已添加"));
 }
 
 void MainWindow::onDeleteLabelClicked() {
-    const int row = m_labelList->currentRow();
+    const int row = ui->labelList->currentRow();
     QString error;
     if (!LabelConfigIO::removeLabel(&m_labelConfig, row, &error)) {
         statusBar()->showMessage(QString::fromUtf8(u8"删除标签失败"));
@@ -215,11 +219,149 @@ void MainWindow::onDeleteLabelClicked() {
     refreshLabelList();
     updateAnnotationColors();
     refreshAnnotationList();
-    m_imageWidget->setAnnotations(m_annotations);
+    ui->imageWidget->setAnnotations(m_annotations);
     statusBar()->showMessage(QString::fromUtf8(u8"标签已删除"));
 }
 
+void MainWindow::onOpenCurrentFolderClicked() {
+    const QString folderPath = m_currentImagePath.isEmpty()
+        ? m_workingDir
+        : QFileInfo(m_currentImagePath).absolutePath();
+    if (folderPath.isEmpty() || !QDir(folderPath).exists()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"当前图像文件夹不存在"));
+        appendLog(QStringLiteral("[OpenCurrentFolder] invalid folder: %1").arg(folderPath));
+        return;
+    }
+
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath))) {
+        statusBar()->showMessage(QString::fromUtf8(u8"打开当前图像文件夹失败"));
+        appendLog(QStringLiteral("[OpenCurrentFolder] failed: %1").arg(folderPath));
+    }
+}
+
+void MainWindow::onClearAllAnnotationsClicked() {
+    if (m_currentImagePath.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"未选择图像"));
+        return;
+    }
+
+    QString error;
+    if (!AnnotationJsonIO::clearAnnotations(m_currentImagePath, &error)) {
+        statusBar()->showMessage(QString::fromUtf8(u8"清空标注失败"));
+        appendLog(QStringLiteral("[ClearAllAnnotations] %1").arg(error));
+        return;
+    }
+
+    reloadAnnotationsForCurrentImage();
+    statusBar()->showMessage(QString::fromUtf8(u8"当前图像标注已清空"));
+}
+
+void MainWindow::onFirstImageClicked() {
+    if (m_imageFilePaths.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"没有可切换的图像"));
+        return;
+    }
+    ui->imageList->setCurrentRow(0);
+}
+
+void MainWindow::onPreviousImageClicked() {
+    if (m_imageFilePaths.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"没有可切换的图像"));
+        return;
+    }
+
+    const int row = ui->imageList->currentRow();
+    if (row <= 0) {
+        ui->imageList->setCurrentRow(0);
+        statusBar()->showMessage(QString::fromUtf8(u8"已经是第一张图"));
+        return;
+    }
+    ui->imageList->setCurrentRow(row - 1);
+}
+
+void MainWindow::onDeleteCurrentImageClicked() {
+    if (m_currentImagePath.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"未选择图像"));
+        return;
+    }
+
+    const QString imagePath = m_currentImagePath;
+    const QString jsonPath = jsonPathFromImagePath(imagePath);
+    const QString confirmText = QString::fromUtf8(u8"确定要删除当前图像和对应 JSON 吗？\n\n%1\n%2")
+                                    .arg(imagePath, jsonPath);
+    const QMessageBox::StandardButton reply =
+        QMessageBox::question(this, QString::fromUtf8(u8"确认删除图像"),
+                              confirmText,
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No);
+    if (reply != QMessageBox::Yes) {
+        statusBar()->showMessage(QString::fromUtf8(u8"已取消删除图像"));
+        return;
+    }
+
+    const int oldRow = ui->imageList->currentRow();
+    if (!QFile::remove(imagePath)) {
+        statusBar()->showMessage(QString::fromUtf8(u8"删除图像失败"));
+        appendLog(QStringLiteral("[DeleteImage] failed to delete image: %1").arg(imagePath));
+        return;
+    }
+
+    bool jsonDeleteFailed = false;
+    if (QFileInfo::exists(jsonPath) && !QFile::remove(jsonPath)) {
+        jsonDeleteFailed = true;
+        appendLog(QStringLiteral("[DeleteImage] failed to delete json: %1").arg(jsonPath));
+    }
+
+    refreshImageList();
+    if (m_imageFilePaths.isEmpty()) {
+        clearCurrentImageState();
+        statusBar()->showMessage(jsonDeleteFailed
+            ? QString::fromUtf8(u8"图像已删除，但对应JSON删除失败")
+            : QString::fromUtf8(u8"图像已删除，当前文件夹无图像"));
+        return;
+    }
+
+    const int nextRow = qBound(0, oldRow, m_imageFilePaths.size() - 1);
+    ui->imageList->setCurrentRow(nextRow);
+    statusBar()->showMessage(jsonDeleteFailed
+        ? QString::fromUtf8(u8"图像已删除，但对应JSON删除失败")
+        : QString::fromUtf8(u8"图像已删除"));
+}
+
+void MainWindow::onNextImageClicked() {
+    if (m_imageFilePaths.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"没有可切换的图像"));
+        return;
+    }
+
+    const int row = ui->imageList->currentRow();
+    if (row < 0) {
+        ui->imageList->setCurrentRow(0);
+        return;
+    }
+    if (row >= m_imageFilePaths.size() - 1) {
+        ui->imageList->setCurrentRow(m_imageFilePaths.size() - 1);
+        statusBar()->showMessage(QString::fromUtf8(u8"已经是最后一张图"));
+        return;
+    }
+    ui->imageList->setCurrentRow(row + 1);
+}
+
+void MainWindow::onFinalImageClicked() {
+    if (m_imageFilePaths.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"没有可切换的图像"));
+        return;
+    }
+    ui->imageList->setCurrentRow(m_imageFilePaths.size() - 1);
+}
+
 void MainWindow::onPointPromptRequested(const QPointF& imagePoint) {
+    if (!isAutoAnnotationMode()) {
+        Q_UNUSED(imagePoint);
+        statusBar()->showMessage(QString::fromUtf8(u8"手动模式请拖拽矩形标注"));
+        return;
+    }
+
     if (!m_bridge->isInitialized()) {
         statusBar()->showMessage(QString::fromUtf8(u8"推理模型未初始化"));
         return;
@@ -258,6 +400,18 @@ void MainWindow::onPointPromptRequested(const QPointF& imagePoint) {
 }
 
 void MainWindow::onRectPromptRequested(const QRectF& imageRect) {
+    if (!isAutoAnnotationMode()) {
+        QString labelError;
+        const QString labelName = currentSelectedLabel(&labelError);
+        if (labelName.isEmpty()) {
+            statusBar()->showMessage(QString::fromUtf8(u8"未选择标签"));
+            appendLog(QStringLiteral("[ManualRect] %1").arg(labelError));
+            return;
+        }
+        saveManualRectAnnotation(imageRect, labelName);
+        return;
+    }
+
     if (!m_bridge->isInitialized()) {
         statusBar()->showMessage(QString::fromUtf8(u8"推理模型未初始化"));
         return;
@@ -296,88 +450,37 @@ void MainWindow::onRectPromptRequested(const QRectF& imageRect) {
 }
 
 void MainWindow::onAnnotationSelectionChanged(int annotationIndex) {
-    m_imageWidget->setSelectedAnnotationIndex(annotationIndex);
-    if (annotationIndex >= 0 && annotationIndex < m_annotationList->count()) {
-        m_annotationList->setCurrentRow(annotationIndex);
+    ui->imageWidget->setSelectedAnnotationIndex(annotationIndex);
+    if (annotationIndex >= 0 && annotationIndex < ui->annotationList->count()) {
+        ui->annotationList->setCurrentRow(annotationIndex);
     }
 }
 
-void MainWindow::setupUi() {
-    resize(1360, 860);
+void MainWindow::setupConnections() {
 
-    auto* central = new QWidget(this);
-    auto* rootLayout = new QVBoxLayout(central);
+    connect(ui->initButton, &QPushButton::clicked, this, &MainWindow::onInitializeBridgeClicked);
+    connect(ui->openFolderButton, &QPushButton::clicked, this, &MainWindow::onOpenFolderClicked);
+    connect(ui->pushButton_5, &QPushButton::clicked, this, &MainWindow::onOpenCurrentFolderClicked);
+    connect(ui->pushButton_clearAllAnno, &QPushButton::clicked, this, &MainWindow::onClearAllAnnotationsClicked);
+    connect(ui->pushButton_firstImg, &QPushButton::clicked, this, &MainWindow::onFirstImageClicked);
+    connect(ui->PB_LastImg, &QPushButton::clicked, this, &MainWindow::onPreviousImageClicked);
+    connect(ui->pushButton_deleteImg, &QPushButton::clicked, this, &MainWindow::onDeleteCurrentImageClicked);
+    connect(ui->pushButton_nextImg, &QPushButton::clicked, this, &MainWindow::onNextImageClicked);
+    connect(ui->pushButton_finalImg, &QPushButton::clicked, this, &MainWindow::onFinalImageClicked);
 
-    auto* toolbarRow = new QHBoxLayout();
-    m_initButton = new QPushButton(QString::fromUtf8(u8"初始化SAM3"), central);
-    m_openFolderButton = new QPushButton(QString::fromUtf8(u8"打开文件夹"), central);
-    toolbarRow->addWidget(m_initButton);
-    toolbarRow->addWidget(m_openFolderButton);
-    toolbarRow->addStretch(1);
+    connect(ui->addLabelButton, &QPushButton::clicked, this, &MainWindow::onAddLabelClicked);
+    connect(ui->deleteLabelButton, &QPushButton::clicked, this, &MainWindow::onDeleteLabelClicked);
+    connect(ui->deleteAnnotationButton, &QPushButton::clicked, this, &MainWindow::onDeleteAnnotationClicked);
+    connect(ui->fixAnnotationButton, &QPushButton::clicked, this, &MainWindow::onFixAnnotationClicked);
 
-    auto* splitter = new QSplitter(Qt::Horizontal, central);
+    connect(ui->imageList, &QListWidget::currentRowChanged, this, &MainWindow::onImageSelectionChanged);
 
-    m_imageList = new QListWidget(splitter);
-    m_imageList->setMinimumWidth(260);
-
-    auto* imagePanel = new QWidget(splitter);
-    auto* imageLayout = new QVBoxLayout(imagePanel);
-    imageLayout->setContentsMargins(0, 0, 0, 0);
-    imageLayout->setSpacing(8);
-    m_imageWidget = new ImageAnnotateWidget(imagePanel);
-    imageLayout->addWidget(m_imageWidget, 1);
-
-    auto* rightPanel = new QWidget(splitter);
-    auto* rightLayout = new QVBoxLayout(rightPanel);
-
-    auto* labelTitle = new QLabel(QString::fromUtf8(u8"标签列表"), rightPanel);
-    m_labelList = new QListWidget(rightPanel);
-    auto* labelButtonRow = new QHBoxLayout();
-    m_addLabelButton = new QPushButton(QString::fromUtf8(u8"添加标签"), rightPanel);
-    m_deleteLabelButton = new QPushButton(QString::fromUtf8(u8"删除标签"), rightPanel);
-    labelButtonRow->addWidget(m_addLabelButton);
-    labelButtonRow->addWidget(m_deleteLabelButton);
-
-    auto* annTitle = new QLabel(QString::fromUtf8(u8"标注列表"), rightPanel);
-    m_annotationList = new QListWidget(rightPanel);
-    auto* annButtonRow = new QHBoxLayout();
-    m_deleteAnnotationButton = new QPushButton(QString::fromUtf8(u8"删除标注"), rightPanel);
-    m_fixAnnotationButton = new QPushButton(QString::fromUtf8(u8"修正标注"), rightPanel);
-    annButtonRow->addWidget(m_deleteAnnotationButton);
-    annButtonRow->addWidget(m_fixAnnotationButton);
-
-    rightLayout->addWidget(labelTitle);
-    rightLayout->addWidget(m_labelList, 1);
-    rightLayout->addLayout(labelButtonRow);
-    rightLayout->addWidget(annTitle);
-    rightLayout->addWidget(m_annotationList, 2);
-    rightLayout->addLayout(annButtonRow);
-
-    splitter->setStretchFactor(0, 2);
-    splitter->setStretchFactor(1, 6);
-    splitter->setStretchFactor(2, 3);
-
-    rootLayout->addLayout(toolbarRow);
-    rootLayout->addWidget(splitter, 1);
-
-    setCentralWidget(central);
-
-    connect(m_initButton, &QPushButton::clicked, this, &MainWindow::onInitializeBridgeClicked);
-    connect(m_openFolderButton, &QPushButton::clicked, this, &MainWindow::onOpenFolderClicked);
-
-    connect(m_addLabelButton, &QPushButton::clicked, this, &MainWindow::onAddLabelClicked);
-    connect(m_deleteLabelButton, &QPushButton::clicked, this, &MainWindow::onDeleteLabelClicked);
-    connect(m_deleteAnnotationButton, &QPushButton::clicked, this, &MainWindow::onDeleteAnnotationClicked);
-    connect(m_fixAnnotationButton, &QPushButton::clicked, this, &MainWindow::onFixAnnotationClicked);
-
-    connect(m_imageList, &QListWidget::currentRowChanged, this, &MainWindow::onImageSelectionChanged);
-
-    connect(m_imageWidget, &ImageAnnotateWidget::pointPromptRequested, this, &MainWindow::onPointPromptRequested);
-    connect(m_imageWidget, &ImageAnnotateWidget::rectPromptRequested, this, &MainWindow::onRectPromptRequested);
-    connect(m_imageWidget, &ImageAnnotateWidget::annotationSelectionChanged,
+    connect(ui->imageWidget, &ImageAnnotateWidget::pointPromptRequested, this, &MainWindow::onPointPromptRequested);
+    connect(ui->imageWidget, &ImageAnnotateWidget::rectPromptRequested, this, &MainWindow::onRectPromptRequested);
+    connect(ui->imageWidget, &ImageAnnotateWidget::annotationSelectionChanged,
             this, &MainWindow::onAnnotationSelectionChanged);
 
-    connect(m_annotationList, &QListWidget::currentRowChanged, m_imageWidget,
+    connect(ui->annotationList, &QListWidget::currentRowChanged, ui->imageWidget,
             &ImageAnnotateWidget::setSelectedAnnotationIndex);
 }
 
@@ -409,18 +512,15 @@ void MainWindow::setWorkingDirectory(const QString& folderPath) {
 
     refreshImageList();
     if (!m_imageFilePaths.isEmpty()) {
-        m_imageList->setCurrentRow(0);
+        ui->imageWidget->setVisible(true);
+        ui->imageList->setCurrentRow(0);
     } else {
-        m_currentImagePath.clear();
-        m_annotations.clear();
-        m_imageWidget->setAnnotations(m_annotations);
-        m_annotationList->clear();
-        m_imageWidget->clearTempResult();
+        clearCurrentImageState();
     }
 }
 
 void MainWindow::refreshImageList() {
-    m_imageList->clear();
+    ui->imageList->clear();
     m_imageFilePaths.clear();
 
     if (m_workingDir.isEmpty()) {
@@ -433,7 +533,7 @@ void MainWindow::refreshImageList() {
 
     for (const QFileInfo& fi : files) {
         m_imageFilePaths.push_back(fi.absoluteFilePath());
-        m_imageList->addItem(fi.fileName());
+        ui->imageList->addItem(fi.fileName());
     }
 }
 
@@ -442,14 +542,15 @@ bool MainWindow::loadImageByPath(const QString& imagePath) {
         return false;
     }
 
-    if (!m_imageWidget->loadImage(imagePath)) {
+    if (!ui->imageWidget->loadImage(imagePath)) {
         statusBar()->showMessage(QString::fromUtf8(u8"加载图像失败"));
         appendLog(QStringLiteral("[Image] failed to load %1").arg(imagePath));
         return false;
     }
 
+    ui->imageWidget->setVisible(true);
     m_currentImagePath = imagePath;
-    m_imageWidget->clearTempResult();
+    ui->imageWidget->clearTempResult();
 
     if (!reloadAnnotationsForCurrentImage()) {
         return false;
@@ -503,21 +604,32 @@ bool MainWindow::saveLabelConfig() {
 }
 
 void MainWindow::refreshLabelList() {
-    m_labelList->clear();
+    const QString previousLabel = ui->comboBox_CurrentLabel->currentText();
+
+    ui->labelList->clear();
+    ui->comboBox_CurrentLabel->clear();
     for (int i = 0; i < m_labelConfig.nameList.size(); ++i) {
         const QString& name = m_labelConfig.nameList.at(i);
         auto* item = new QListWidgetItem(name);
         item->setForeground(colorFromInt(i < m_labelConfig.colorDefine.size() ? m_labelConfig.colorDefine.at(i) : 0x00FF00));
-        m_labelList->addItem(item);
+        ui->labelList->addItem(item);
+        ui->comboBox_CurrentLabel->addItem(name);
     }
-    if (m_labelList->count() > 0 && m_labelList->currentRow() < 0) {
-        m_labelList->setCurrentRow(0);
+    if (ui->labelList->count() > 0 && ui->labelList->currentRow() < 0) {
+        ui->labelList->setCurrentRow(0);
+    }
+
+    const int previousIndex = ui->comboBox_CurrentLabel->findText(previousLabel);
+    if (previousIndex >= 0) {
+        ui->comboBox_CurrentLabel->setCurrentIndex(previousIndex);
+    } else if (ui->comboBox_CurrentLabel->count() > 0) {
+        ui->comboBox_CurrentLabel->setCurrentIndex(0);
     }
 }
 
 bool MainWindow::reloadAnnotationsForCurrentImage() {
     m_annotations.clear();
-    m_imageWidget->setAnnotations(m_annotations);
+    ui->imageWidget->setAnnotations(m_annotations);
     refreshAnnotationList();
 
     if (m_currentImagePath.isEmpty()) {
@@ -532,18 +644,18 @@ bool MainWindow::reloadAnnotationsForCurrentImage() {
     }
 
     updateAnnotationColors();
-    m_imageWidget->setAnnotations(m_annotations);
+    ui->imageWidget->setAnnotations(m_annotations);
     refreshAnnotationList();
     return true;
 }
 
 void MainWindow::refreshAnnotationList() {
-    m_annotationList->clear();
+    ui->annotationList->clear();
     for (int i = 0; i < m_annotations.size(); ++i) {
         const AnnotationObject& ann = m_annotations.at(i);
         auto* item = new QListWidgetItem(QStringLiteral("%1 - %2").arg(i + 1).arg(ann.label));
         item->setForeground(colorFromInt(ann.colorValue));
-        m_annotationList->addItem(item);
+        ui->annotationList->addItem(item);
     }
 }
 
@@ -561,23 +673,73 @@ int MainWindow::colorForLabel(const QString& label) const {
     return 0x00C8FF;
 }
 
+bool MainWindow::isAutoAnnotationMode() const {
+    return ui->comboBox_AnnoMode->currentIndex() == 0;
+}
+
+void MainWindow::clearCurrentImageState() {
+    m_currentImagePath.clear();
+    m_annotations.clear();
+    ui->imageWidget->setAnnotations(m_annotations);
+    ui->imageWidget->clearTempResult();
+//    ui->imageWidget->setVisible(false);
+    ui->annotationList->clear();
+}
+
+bool MainWindow::saveManualRectAnnotation(const QRectF& imageRect, const QString& labelName) {
+    if (m_currentImagePath.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"未选择图像"));
+        return false;
+    }
+
+    const QRectF rect = imageRect.normalized();
+    if (!rect.isValid() || rect.width() < 2.0 || rect.height() < 2.0) {
+        statusBar()->showMessage(QString::fromUtf8(u8"手动矩形太小"));
+        appendLog(QStringLiteral("[ManualRect] rectangle is too small"));
+        return false;
+    }
+
+    QPolygonF rectPolygon;
+    rectPolygon << rect.topLeft()
+                << QPointF(rect.right(), rect.top())
+                << rect.bottomRight()
+                << QPointF(rect.left(), rect.bottom());
+
+    AnnotationObject annotation;
+    annotation.label = labelName;
+    annotation.colorValue = colorForLabel(labelName);
+    annotation.rectPolygonImage = toAxisAlignedRectPolygon(rectPolygon);
+
+    QString error;
+    if (!AnnotationJsonIO::appendAnnotation(m_currentImagePath, annotation, &error)) {
+        statusBar()->showMessage(QString::fromUtf8(u8"保存手动标注失败"));
+        appendLog(QStringLiteral("[ManualRect] %1").arg(error));
+        return false;
+    }
+
+    ui->imageWidget->clearTempResult();
+    reloadAnnotationsForCurrentImage();
+    statusBar()->showMessage(QString::fromUtf8(u8"手动标注已保存"));
+    return true;
+}
+
 QString MainWindow::currentSelectedLabel(QString* errorMessage) const {
-    if (m_labelConfig.nameList.isEmpty() || m_labelList == nullptr || m_labelList->currentRow() < 0) {
+    if (m_labelConfig.nameList.isEmpty() || ui->comboBox_CurrentLabel->currentIndex() < 0) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("No selected label for SAM3 result.");
+            *errorMessage = QStringLiteral("No selected label for annotation.");
         }
         return QString();
     }
 
-    const int row = m_labelList->currentRow();
-    if (row >= m_labelConfig.nameList.size()) {
+    const QString labelName = ui->comboBox_CurrentLabel->currentText();
+    if (labelName.isEmpty() || !m_labelConfig.nameList.contains(labelName)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Selected label index is out of range.");
+            *errorMessage = QStringLiteral("Selected label is not in label config.");
         }
         return QString();
     }
 
-    return m_labelConfig.nameList.at(row);
+    return labelName;
 }
 
 QList<AnnotationObject> MainWindow::annotationsFromSamResult(const SamInferResult& result, const QString& labelName,
@@ -633,7 +795,7 @@ bool MainWindow::saveSamResultAnnotations(const SamInferResult& result, const QS
         return false;
     }
 
-    m_imageWidget->clearTempResult();
+    ui->imageWidget->clearTempResult();
     reloadAnnotationsForCurrentImage();
     statusBar()->showMessage(QString::fromUtf8(u8"SAM3已保存%1个目标").arg(newAnnotations.size()));
     appendLog(QStringLiteral("[SAM3 SaveResult] appended %1 annotations with label %2")

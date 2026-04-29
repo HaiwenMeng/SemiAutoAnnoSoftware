@@ -29,6 +29,9 @@ HEADERS += \
     data/AnnotationJsonIO.h \
     data/LabelConfigIO.h
 
+FORMS += \
+    app/MainWindow.ui
+
 INCLUDEPATH += \
     $$PWD \
     $$PWD/app \
