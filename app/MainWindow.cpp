@@ -32,6 +32,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QShortcut>
 
 #include "app/StartupOverlay.h"
 #include "app/UiTheme.h"
@@ -352,9 +353,9 @@ void MainWindow::applyStaticTextAndIcons() {
     configureActionButton(ui->pushButton_firstImg, QString::fromUtf8(u8"第一张"),
                           QStringLiteral(":/assets/icons/chevrons-left.svg"), QString::fromUtf8(u8"跳转到第一张图片"));
     configureActionButton(ui->PB_LastImg, QString::fromUtf8(u8"上一张"),
-                          QStringLiteral(":/assets/icons/chevron-left.svg"), QString::fromUtf8(u8"切换到上一张图片"));
+                          QStringLiteral(":/assets/icons/chevron-left.svg"), QString::fromUtf8(u8"切换到上一张图片\n快捷键A"));
     configureActionButton(ui->pushButton_nextImg, QString::fromUtf8(u8"下一张"),
-                          QStringLiteral(":/assets/icons/chevron-right.svg"), QString::fromUtf8(u8"切换到下一张图片"));
+                          QStringLiteral(":/assets/icons/chevron-right.svg"), QString::fromUtf8(u8"切换到下一张图片\n快捷键D"));
     configureActionButton(ui->pushButton_finalImg, QString::fromUtf8(u8"最后一张"),
                           QStringLiteral(":/assets/icons/chevrons-right.svg"), QString::fromUtf8(u8"跳转到最后一张图片"));
     configureActionButton(ui->pushButton_deleteImg, QString::fromUtf8(u8"删除图片"),
@@ -834,6 +835,14 @@ void MainWindow::onSamRectInferenceFinished(const SamInferResult& result, const 
 }
 
 void MainWindow::setupConnections() {
+    QShortcut *lastImageShortcut = new QShortcut(QKeySequence(Qt::Key_A), this);
+    lastImageShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(lastImageShortcut, &QShortcut::activated, this, &MainWindow::onPreviousImageClicked);
+
+    QShortcut *nextImageShortcut = new QShortcut(QKeySequence(Qt::Key_D), this);
+    nextImageShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(nextImageShortcut, &QShortcut::activated, this, &MainWindow::onNextImageClicked);
+
     connect(ui->initButton, &QPushButton::clicked, this, &MainWindow::onInitializeBridgeClicked);
     connect(ui->openFolderButton, &QPushButton::clicked, this, &MainWindow::onOpenFolderClicked);
     connect(ui->pushButton_5, &QPushButton::clicked, this, &MainWindow::onOpenCurrentFolderClicked);
