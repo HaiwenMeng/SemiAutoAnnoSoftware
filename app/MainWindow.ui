@@ -6,9 +6,12 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>934</width>
-    <height>597</height>
+    <width>1180</width>
+    <height>760</height>
    </rect>
+  </property>
+  <property name="windowTitle">
+   <string>首图半自动标注软件</string>
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QGridLayout" name="gridLayout_3">
@@ -26,14 +29,14 @@
         <item>
          <widget class="QPushButton" name="initButton">
           <property name="text">
-           <string>初始化SAM3</string>
+           <string>初始化 SAM3</string>
           </property>
          </widget>
         </item>
         <item>
          <widget class="QPushButton" name="pushButton_5">
           <property name="text">
-           <string>转入目录</string>
+           <string>打开目录</string>
           </property>
          </widget>
         </item>
@@ -46,12 +49,6 @@
         </item>
         <item>
          <widget class="QComboBox" name="comboBox_AnnoMode">
-          <property name="minimumSize">
-           <size>
-            <width>60</width>
-            <height>0</height>
-           </size>
-          </property>
           <item>
            <property name="text">
             <string>自动</string>
@@ -118,34 +115,26 @@
       </item>
       <item row="1" column="1">
        <layout class="QGridLayout" name="gridLayout">
+        <item row="0" column="0" colspan="5">
+         <layout class="QVBoxLayout" name="imageLayout">
+          <item>
+           <widget class="ImageAnnotateWidget" name="imageWidget" native="true"/>
+          </item>
+         </layout>
+        </item>
+        <item row="1" column="0">
+         <widget class="QPushButton" name="pushButton_firstImg">
+          <property name="text">
+           <string>第一张</string>
+          </property>
+         </widget>
+        </item>
         <item row="1" column="1">
          <widget class="QPushButton" name="PB_LastImg">
           <property name="text">
            <string>上一张</string>
           </property>
          </widget>
-        </item>
-        <item row="0" column="0" colspan="5">
-         <layout class="QVBoxLayout" name="imageLayout">
-          <property name="spacing">
-           <number>8</number>
-          </property>
-          <property name="leftMargin">
-           <number>0</number>
-          </property>
-          <property name="topMargin">
-           <number>0</number>
-          </property>
-          <property name="rightMargin">
-           <number>0</number>
-          </property>
-          <property name="bottomMargin">
-           <number>0</number>
-          </property>
-          <item>
-           <widget class="ImageAnnotateWidget" name="imageWidget" native="true"/>
-          </item>
-         </layout>
         </item>
         <item row="1" column="2">
          <widget class="QPushButton" name="pushButton_deleteImg">
@@ -161,17 +150,10 @@
           </property>
          </widget>
         </item>
-        <item row="1" column="0">
-         <widget class="QPushButton" name="pushButton_firstImg">
-          <property name="text">
-           <string>第一张</string>
-          </property>
-         </widget>
-        </item>
         <item row="1" column="4">
          <widget class="QPushButton" name="pushButton_finalImg">
           <property name="text">
-           <string>最末张</string>
+           <string>最后一张</string>
           </property>
          </widget>
         </item>

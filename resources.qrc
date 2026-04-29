@@ -1,0 +1,18 @@
+<RCC>
+    <qresource prefix="/">
+        <file>styles/dark.qss</file>
+        <file>assets/images/empty-workspace.svg</file>
+        <file>assets/icons/app.svg</file>
+        <file>assets/icons/folder-open.svg</file>
+        <file>assets/icons/cpu.svg</file>
+        <file>assets/icons/folder-search.svg</file>
+        <file>assets/icons/chevrons-left.svg</file>
+        <file>assets/icons/chevron-left.svg</file>
+        <file>assets/icons/chevron-right.svg</file>
+        <file>assets/icons/chevrons-right.svg</file>
+        <file>assets/icons/trash.svg</file>
+        <file>assets/icons/plus.svg</file>
+        <file>assets/icons/edit.svg</file>
+        <file>assets/icons/eraser.svg</file>
+    </qresource>
+</RCC>

@@ -1,13 +1,14 @@
 #ifndef AUTOLABELPROJECT_APP_MAINWINDOW_H
 #define AUTOLABELPROJECT_APP_MAINWINDOW_H
 
-#include <QMainWindow>
 #include <QList>
+#include <QMainWindow>
 #include <QStringList>
 
 #include "app/AppTypes.h"
 #include "inference/SamTypes.h"
 
+class QLabel;
 class SamInferenceBridge;
 
 namespace Ui {
@@ -40,8 +41,12 @@ private slots:
     void onPointPromptRequested(const QPointF& imagePoint);
     void onRectPromptRequested(const QRectF& imageRect);
     void onAnnotationSelectionChanged(int annotationIndex);
+    void onImageViewportChanged(const QString& statusText);
 
 private:
+    void setupCommercialWorkspace();
+    void setupStatusBarWidgets();
+    void applyStaticTextAndIcons();
     void setupConnections();
     void appendLog(const QString& message);
 
@@ -56,6 +61,9 @@ private:
     bool reloadAnnotationsForCurrentImage();
     void refreshAnnotationList();
     void updateAnnotationColors();
+    void updateStatusSummary(const QString& message = QString());
+    void setModelStatusText(const QString& text);
+    void setImageStatusText(const QString& text);
     int colorForLabel(const QString& label) const;
     bool isAutoAnnotationMode() const;
     void clearCurrentImageState();
@@ -75,6 +83,10 @@ private:
 
     QList<AnnotationObject> m_annotations;
     LabelConfig m_labelConfig;
+
+    QLabel* m_modelStatusLabel = nullptr;
+    QLabel* m_imageStatusLabel = nullptr;
+    QLabel* m_folderStatusLabel = nullptr;
 };
 
 #endif // AUTOLABELPROJECT_APP_MAINWINDOW_H

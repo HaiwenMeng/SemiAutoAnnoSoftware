@@ -1,4 +1,4 @@
-QT += core gui widgets
+QT += core gui widgets svg
 
 CONFIG += c++17
 win32-msvc*: QMAKE_CXXFLAGS += /utf-8
@@ -10,6 +10,7 @@ DEFINES += NOMINMAX
 
 SOURCES += \
     main.cpp \
+    app/UiTheme.cpp \
     app/MainWindow.cpp \
     widgets/ImageAnnotateWidget.cpp \
     dialogs/LabelSelectDialog.cpp \
@@ -20,6 +21,7 @@ SOURCES += \
 
 HEADERS += \
     app/AppTypes.h \
+    app/UiTheme.h \
     app/MainWindow.h \
     widgets/ImageAnnotateWidget.h \
     dialogs/LabelSelectDialog.h \
@@ -31,6 +33,9 @@ HEADERS += \
 
 FORMS += \
     app/MainWindow.ui
+
+RESOURCES += \
+    resources.qrc
 
 INCLUDEPATH += \
     $$PWD \

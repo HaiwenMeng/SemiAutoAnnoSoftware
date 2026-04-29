@@ -10,6 +10,7 @@
 #include "app/AppTypes.h"
 
 class QWheelEvent;
+class QPainter;
 
 class ImageAnnotateWidget : public QWidget {
     Q_OBJECT
@@ -21,11 +22,13 @@ public:
     void setTempResult(const TempInferenceResult& result);
     void setAnnotations(const QList<AnnotationObject>& annotations);
     void setSelectedAnnotationIndex(int index);
+    QString viewportStatusText() const;
 
 signals:
     void pointPromptRequested(const QPointF& imagePoint);
     void rectPromptRequested(const QRectF& imageRect);
     void annotationSelectionChanged(int annotationIndex);
+    void viewportStatusChanged(const QString& statusText);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -36,6 +39,10 @@ protected:
 
 private:
     QRect imageDisplayRect() const;
+    void emitViewportStatus();
+    void drawEmptyState(QPainter* painter);
+    void drawCanvasBackground(QPainter* painter);
+    void drawHud(QPainter* painter, const QRect& display);
     bool widgetToImage(const QPoint& widgetPoint, QPointF* imagePoint) const;
     QPointF imageToWidget(const QPointF& imagePoint) const;
     QPolygonF imageToWidgetPolygon(const QPolygonF& polyImage) const;
