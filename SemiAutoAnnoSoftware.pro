@@ -10,8 +10,10 @@ DEFINES += NOMINMAX
 
 SOURCES += \
     main.cpp \
+    app/StartupOverlay.cpp \
     app/UiTheme.cpp \
     app/MainWindow.cpp \
+    inference/SamInferenceWorker.cpp \
     widgets/ImageAnnotateWidget.cpp \
     dialogs/LabelSelectDialog.cpp \
     dialogs/AddLabelDialog.cpp \
@@ -21,8 +23,10 @@ SOURCES += \
 
 HEADERS += \
     app/AppTypes.h \
+    app/StartupOverlay.h \
     app/UiTheme.h \
     app/MainWindow.h \
+    inference/SamInferenceWorker.h \
     widgets/ImageAnnotateWidget.h \
     dialogs/LabelSelectDialog.h \
     dialogs/AddLabelDialog.h \
@@ -53,3 +57,5 @@ LIBS += \
     -L$${SAM_LIB_DIR} \
     -lSamBaseLib \
     -lTrtSam3Lib
+
+win32:LIBS += -ldwmapi -luser32

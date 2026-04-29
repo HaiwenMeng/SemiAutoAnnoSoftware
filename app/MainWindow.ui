@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>首图半自动标注软件</string>
+   <string>颖图半自动标注软件</string>
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QGridLayout" name="gridLayout_3">
@@ -29,7 +29,7 @@
         <item>
          <widget class="QPushButton" name="initButton">
           <property name="text">
-           <string>初始化 SAM3</string>
+           <string>初始化模型</string>
           </property>
          </widget>
         </item>
@@ -75,6 +75,23 @@
             <width>120</width>
             <height>0</height>
            </size>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_4">
+          <property name="text">
+           <string>显示标签名</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="checkBox_HideLabel">
+          <property name="text">
+           <string/>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
           </property>
          </widget>
         </item>

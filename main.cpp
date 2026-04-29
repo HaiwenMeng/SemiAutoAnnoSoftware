@@ -11,6 +11,7 @@ int main(int argc, char* argv[]) {
 
     MainWindow window;
     window.show();
+    UiTheme::applyDarkTitleBar(&window);
 
     return app.exec();
 }

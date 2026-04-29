@@ -9,7 +9,11 @@
 #include "inference/SamTypes.h"
 
 class QLabel;
-class SamInferenceBridge;
+class QResizeEvent;
+class QShowEvent;
+class QThread;
+class SamInferenceWorker;
+class StartupOverlay;
 
 namespace Ui {
 class MainWindow;
@@ -42,13 +46,27 @@ private slots:
     void onRectPromptRequested(const QRectF& imageRect);
     void onAnnotationSelectionChanged(int annotationIndex);
     void onImageViewportChanged(const QString& statusText);
+    void onSamInitializeFinished(bool success, const QString& errorMessage);
+    void onSamCurrentImageFinished(const QString& imagePath, bool success, const QString& errorMessage);
+    void onSamPointInferenceFinished(const SamInferResult& result, const QString& labelName, const QString& imagePath);
+    void onSamRectInferenceFinished(const SamInferResult& result, const QString& labelName, const QString& imagePath);
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private:
     void setupCommercialWorkspace();
     void setupStatusBarWidgets();
+    void setupStartupOverlay();
+    void setupInferenceWorker();
     void applyStaticTextAndIcons();
     void setupConnections();
     void appendLog(const QString& message);
+    void applyNativeTitleBarTheme();
+    void startSamInitialization(bool automatic);
+    void requestSetCurrentImageForWorker();
+    bool ensureModelReadyForInference();
 
     void updateWindowTitle();
     void setWorkingDirectory(const QString& folderPath);
@@ -71,18 +89,27 @@ private:
     QString currentSelectedLabel(QString* errorMessage = nullptr) const;
     QList<AnnotationObject> annotationsFromSamResult(const SamInferResult& result, const QString& labelName,
                                                      QString* errorMessage = nullptr);
-    bool saveSamResultAnnotations(const SamInferResult& result, const QString& labelName);
+    bool saveSamResultAnnotations(const SamInferResult& result, const QString& labelName,
+                                  const QString& imagePath = QString());
 
     Ui::MainWindow* ui = nullptr;
-    SamInferenceBridge* m_bridge = nullptr;
+    QThread* m_inferenceThread = nullptr;
+    SamInferenceWorker* m_inferenceWorker = nullptr;
+    StartupOverlay* m_startupOverlay = nullptr;
 
     QString m_workingDir;
     QStringList m_imageFilePaths;
     QString m_currentImagePath;
+    QString m_workerCurrentImagePath;
+    QString m_pendingWorkerImagePath;
     QString m_labelConfigPath;
 
     QList<AnnotationObject> m_annotations;
     LabelConfig m_labelConfig;
+    bool m_modelInitialized = false;
+    bool m_modelInitializing = false;
+    bool m_inferenceBusy = false;
+    bool m_automaticInitialization = false;
 
     QLabel* m_modelStatusLabel = nullptr;
     QLabel* m_imageStatusLabel = nullptr;

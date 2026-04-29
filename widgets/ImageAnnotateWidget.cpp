@@ -75,6 +75,14 @@ void ImageAnnotateWidget::setSelectedAnnotationIndex(int index) {
     update();
 }
 
+void ImageAnnotateWidget::setShowAnnotationLabels(bool show) {
+    if (m_showAnnotationLabels == show) {
+        return;
+    }
+    m_showAnnotationLabels = show;
+    update();
+}
+
 QString ImageAnnotateWidget::viewportStatusText() const {
     if (m_image.isNull()) {
         return QString::fromUtf8(u8"未加载图像");
@@ -138,19 +146,21 @@ void ImageAnnotateWidget::paintEvent(QPaintEvent* event) {
             }
         }
 
-        const QString tag = QStringLiteral("%1  %2").arg(i + 1).arg(ann.label);
-        const QFontMetrics fm(painter.font());
-        const QRect textBounds = fm.boundingRect(tag).adjusted(-10, -4, 10, 5);
-        QPoint textPos(static_cast<int>(qRound(box.left())), static_cast<int>(qRound(box.top())) - 5);
-        if (textPos.y() - textBounds.height() < 0) {
-            textPos.setY(static_cast<int>(qRound(box.top())) + textBounds.height() + 6);
-        }
-        if (textPos.x() + textBounds.width() > width()) {
-            textPos.setX(qMax(0, width() - textBounds.width() - 2));
-        }
+        if (m_showAnnotationLabels) {
+            const QString tag = QStringLiteral("%1  %2").arg(i + 1).arg(ann.label);
+            const QFontMetrics fm(painter.font());
+            const QRect textBounds = fm.boundingRect(tag).adjusted(-10, -4, 10, 5);
+            QPoint textPos(static_cast<int>(qRound(box.left())), static_cast<int>(qRound(box.top())) - 5);
+            if (textPos.y() - textBounds.height() < 0) {
+                textPos.setY(static_cast<int>(qRound(box.top())) + textBounds.height() + 6);
+            }
+            if (textPos.x() + textBounds.width() > width()) {
+                textPos.setX(qMax(0, width() - textBounds.width() - 2));
+            }
 
-        const QRect bgRect(textPos.x(), textPos.y() - textBounds.height(), textBounds.width(), textBounds.height());
-        drawRoundedLabel(&painter, bgRect, drawColor, tag);
+            const QRect bgRect(textPos.x(), textPos.y() - textBounds.height(), textBounds.width(), textBounds.height());
+            drawRoundedLabel(&painter, bgRect, drawColor, tag);
+        }
     }
 
     if (m_tempResult.valid) {

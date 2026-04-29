@@ -78,6 +78,28 @@ QComboBox::drop-down {
     border: none;
 }
 
+QCheckBox {
+    spacing: 6px;
+    background: transparent;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #44516A;
+    border-radius: 4px;
+    background: #0F141D;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #4D8DFF;
+}
+
+QCheckBox::indicator:checked {
+    border-color: #62D2A2;
+    background: #173B34;
+}
+
 QListWidget {
     border: 1px solid #2A3342;
     border-radius: 8px;

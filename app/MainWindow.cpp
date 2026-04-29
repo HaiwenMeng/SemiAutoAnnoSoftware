@@ -2,6 +2,7 @@
 
 #include <exception>
 
+#include <QCheckBox>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDesktopServices>
@@ -19,18 +20,26 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QMessageBox>
+#include <QMetaObject>
+#include <QMetaType>
 #include <QPushButton>
+#include <QResizeEvent>
+#include <QShowEvent>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QThread>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "app/StartupOverlay.h"
+#include "app/UiTheme.h"
 #include "data/AnnotationJsonIO.h"
 #include "data/LabelConfigIO.h"
 #include "dialogs/AddLabelDialog.h"
 #include "dialogs/LabelSelectDialog.h"
-#include "inference/SamInferenceBridge.h"
+#include "inference/SamInferenceWorker.h"
 #include "inference/SamTypes.h"
 #include "ui_MainWindow.h"
 
@@ -108,22 +117,32 @@ void configureActionButton(QPushButton* button, const QString& text, const QStri
 }
 }
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow), m_bridge(new SamInferenceBridge()) {
+MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
+    qRegisterMetaType<SamInferResult>("SamInferResult");
+
     ui->setupUi(this);
     setupCommercialWorkspace();
     setupStatusBarWidgets();
+    setupStartupOverlay();
+    setupInferenceWorker();
     applyStaticTextAndIcons();
     setupConnections();
 
     m_workingDir = QCoreApplication::applicationDirPath();
-    setModelStatusText(QString::fromUtf8(u8"SAM3 未初始化"));
+    setModelStatusText(QString::fromUtf8(u8"模型未初始化"));
     setImageStatusText(QString::fromUtf8(u8"未加载图像"));
     setWorkingDirectory(m_workingDir);
     statusBar()->showMessage(QString::fromUtf8(u8"就绪"));
+    QTimer::singleShot(0, this, [this]() {
+        startSamInitialization(true);
+    });
 }
 
 MainWindow::~MainWindow() {
-    delete m_bridge;
+    if (m_inferenceThread) {
+        m_inferenceThread->quit();
+        m_inferenceThread->wait();
+    }
     delete ui;
 }
 
@@ -142,9 +161,12 @@ void MainWindow::setupCommercialWorkspace() {
     commandLayout->setContentsMargins(10, 7, 10, 7);
     commandLayout->setSpacing(8);
 
-    auto* productTitle = new QLabel(QString::fromUtf8(u8"首图半自动标注工作台"), commandBar);
+    auto* productTitle = new QLabel(QString::fromUtf8(u8"工作台"), commandBar);
     productTitle->setProperty("class", QStringLiteral("sectionTitle"));
-    productTitle->setMinimumWidth(180);
+    QFont tFont = productTitle->font();
+    tFont.setPixelSize(20);
+    productTitle->setFont(tFont);
+    productTitle->setMinimumWidth(60);
     commandLayout->addWidget(productTitle);
     commandLayout->addSpacing(8);
     commandLayout->addWidget(ui->openFolderButton);
@@ -155,6 +177,8 @@ void MainWindow::setupCommercialWorkspace() {
     commandLayout->addWidget(ui->comboBox_AnnoMode);
     commandLayout->addWidget(ui->label);
     commandLayout->addWidget(ui->comboBox_CurrentLabel);
+    commandLayout->addWidget(ui->label_4);
+    commandLayout->addWidget(ui->checkBox_HideLabel);
     commandLayout->addStretch(1);
     root->addWidget(commandBar);
 
@@ -243,6 +267,59 @@ void MainWindow::setupStatusBarWidgets() {
     statusBar()->addPermanentWidget(m_folderStatusLabel, 1);
 }
 
+void MainWindow::setupStartupOverlay() {
+    m_startupOverlay = new StartupOverlay(ui->centralWidget);
+    m_startupOverlay->setGeometry(ui->centralWidget->rect());
+    m_startupOverlay->hide();
+}
+
+void MainWindow::setupInferenceWorker() {
+    m_inferenceThread = new QThread(this);
+    m_inferenceWorker = new SamInferenceWorker();
+    m_inferenceWorker->moveToThread(m_inferenceThread);
+
+    connect(m_inferenceThread, &QThread::finished, m_inferenceWorker, &QObject::deleteLater);
+    connect(m_inferenceWorker, &SamInferenceWorker::initializeFinished,
+            this, &MainWindow::onSamInitializeFinished);
+    connect(m_inferenceWorker, &SamInferenceWorker::currentImageFinished,
+            this, &MainWindow::onSamCurrentImageFinished);
+    connect(m_inferenceWorker, &SamInferenceWorker::pointInferenceFinished,
+            this, &MainWindow::onSamPointInferenceFinished);
+    connect(m_inferenceWorker, &SamInferenceWorker::rectInferenceFinished,
+            this, &MainWindow::onSamRectInferenceFinished);
+
+    m_inferenceThread->start();
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event) {
+    QMainWindow::resizeEvent(event);
+    if (m_startupOverlay) {
+        m_startupOverlay->setGeometry(ui->centralWidget->rect());
+        if (m_startupOverlay->isVisible()) {
+            m_startupOverlay->raise();
+        }
+    }
+}
+
+void MainWindow::showEvent(QShowEvent* event) {
+    QMainWindow::showEvent(event);
+    applyNativeTitleBarTheme();
+}
+
+void MainWindow::applyNativeTitleBarTheme() {
+    if (!isVisible()) {
+        return;
+    }
+
+    UiTheme::applyDarkTitleBar(this);
+    QTimer::singleShot(0, this, [this]() {
+        UiTheme::applyDarkTitleBar(this);
+    });
+    QTimer::singleShot(120, this, [this]() {
+        UiTheme::applyDarkTitleBar(this);
+    });
+}
+
 void MainWindow::applyStaticTextAndIcons() {
     setWindowIcon(QIcon(QStringLiteral(":/assets/icons/app.svg")));
     ui->label_2->setText(QString::fromUtf8(u8"图片列表"));
@@ -250,6 +327,9 @@ void MainWindow::applyStaticTextAndIcons() {
     ui->annTitle->setText(QString::fromUtf8(u8"标注对象"));
     ui->label_3->setText(QString::fromUtf8(u8"标注模式"));
     ui->label->setText(QString::fromUtf8(u8"当前标签"));
+    ui->label_4->setText(QString::fromUtf8(u8"显示标签"));
+    ui->checkBox_HideLabel->setChecked(true);
+    ui->imageWidget->setShowAnnotationLabels(true);
     markSectionTitle(ui->label_2);
     markSectionTitle(ui->labelTitle);
     markSectionTitle(ui->annTitle);
@@ -265,8 +345,8 @@ void MainWindow::applyStaticTextAndIcons() {
 
     configureActionButton(ui->openFolderButton, QString::fromUtf8(u8"打开文件夹"),
                           QStringLiteral(":/assets/icons/folder-open.svg"), QString::fromUtf8(u8"选择图片文件夹"));
-    configureActionButton(ui->initButton, QString::fromUtf8(u8"初始化 SAM3"),
-                          QStringLiteral(":/assets/icons/cpu.svg"), QString::fromUtf8(u8"初始化 SAM3 推理模型"));
+    configureActionButton(ui->initButton, QString::fromUtf8(u8"初始化 模型"),
+                          QStringLiteral(":/assets/icons/cpu.svg"), QString::fromUtf8(u8"初始化 模型 推理模型"));
     configureActionButton(ui->pushButton_5, QString::fromUtf8(u8"打开目录"),
                           QStringLiteral(":/assets/icons/folder-search.svg"), QString::fromUtf8(u8"在资源管理器中打开当前目录"));
     configureActionButton(ui->pushButton_firstImg, QString::fromUtf8(u8"第一张"),
@@ -292,23 +372,69 @@ void MainWindow::applyStaticTextAndIcons() {
 }
 
 void MainWindow::onInitializeBridgeClicked() {
-    QString error;
-    if (!m_bridge->initialize(&error)) {
-        setModelStatusText(QString::fromUtf8(u8"SAM3 初始化失败"));
+    startSamInitialization(false);
+}
+
+void MainWindow::startSamInitialization(bool automatic) {
+    if (m_modelInitialized) {
+        statusBar()->showMessage(QString::fromUtf8(u8"模型已就绪"));
+        return;
+    }
+    if (m_modelInitializing) {
+        statusBar()->showMessage(QString::fromUtf8(u8"SAM3正在初始化"));
+        return;
+    }
+    if (!m_inferenceWorker) {
+        const QString error = QStringLiteral("model worker thread is not available.");
+        setModelStatusText(QString::fromUtf8(u8"模型初始化失败"));
         statusBar()->showMessage(QString::fromUtf8(u8"初始化失败"));
         appendLog(QStringLiteral("[Init] %1").arg(error));
         return;
     }
 
-    setModelStatusText(QString::fromUtf8(u8"SAM3 已就绪"));
-    statusBar()->showMessage(QString::fromUtf8(u8"SAM3 初始化成功"));
-    appendLog(QStringLiteral("[Init] SAM3 initialized"));
+    m_modelInitializing = true;
+    m_automaticInitialization = automatic;
+    ui->initButton->setEnabled(false);
+    setModelStatusText(QString::fromUtf8(u8"模型初始化中"));
+    statusBar()->showMessage(QString::fromUtf8(u8"模型正在后台初始化"));
 
-    if (!m_currentImagePath.isEmpty()) {
-        if (!m_bridge->setCurrentImage(m_currentImagePath, &error)) {
-            appendLog(QStringLiteral("[SetCurrentImage] %1").arg(error));
-        }
+    if (automatic && m_startupOverlay) {
+        m_startupOverlay->showMessage(QString::fromUtf8(u8"正在初始化 SAM3"),
+                                      QString::fromUtf8(u8"请等待初始化完成..."));
     }
+
+    QMetaObject::invokeMethod(m_inferenceWorker, "initialize", Qt::QueuedConnection);
+}
+
+void MainWindow::requestSetCurrentImageForWorker() {
+    if (!m_modelInitialized || !m_inferenceWorker || m_currentImagePath.isEmpty()) {
+        return;
+    }
+    m_pendingWorkerImagePath = m_currentImagePath;
+
+    QMetaObject::invokeMethod(m_inferenceWorker, "setCurrentImage", Qt::QueuedConnection,
+                              Q_ARG(QString, m_currentImagePath));
+}
+
+bool MainWindow::ensureModelReadyForInference() {
+    if (m_currentImagePath.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"未选择图像"));
+        return false;
+    }
+    if (m_modelInitialized) {
+        if (m_workerCurrentImagePath == m_currentImagePath) {
+            return true;
+        }
+        requestSetCurrentImageForWorker();
+        statusBar()->showMessage(QString::fromUtf8(u8"当前图像正在同步到 SAM3，请稍后再试"));
+        return false;
+    }
+    if (m_modelInitializing) {
+        statusBar()->showMessage(QString::fromUtf8(u8"模型正在初始化，请稍后再试"));
+    } else {
+        statusBar()->showMessage(QString::fromUtf8(u8"推理模型未初始化"));
+    }
+    return false;
 }
 
 void MainWindow::onOpenFolderClicked() {
@@ -572,8 +698,11 @@ void MainWindow::onPointPromptRequested(const QPointF& imagePoint) {
         return;
     }
 
-    if (!m_bridge->isInitialized()) {
-        statusBar()->showMessage(QString::fromUtf8(u8"推理模型未初始化"));
+    if (!ensureModelReadyForInference()) {
+        return;
+    }
+    if (m_inferenceBusy) {
+        statusBar()->showMessage(QString::fromUtf8(u8"模型正在推理，请稍后"));
         return;
     }
 
@@ -585,28 +714,12 @@ void MainWindow::onPointPromptRequested(const QPointF& imagePoint) {
         return;
     }
 
-    SamInferResult result;
-    try {
-        result = m_bridge->inferByPoint(imagePoint, labelName);
-    } catch (const std::exception& ex) {
-        statusBar()->showMessage(QString::fromUtf8(u8"推理异常"));
-        appendLog(QStringLiteral("[InferByPoint] exception: %1").arg(ex.what()));
-        return;
-    } catch (...) {
-        statusBar()->showMessage(QString::fromUtf8(u8"推理异常"));
-        appendLog(QStringLiteral("[InferByPoint] unknown exception"));
-        return;
-    }
-
-    if (!result.success) {
-        statusBar()->showMessage(QString::fromUtf8(u8"推理失败"));
-        appendLog(QStringLiteral("[InferByPoint] %1").arg(result.errorMessage));
-        return;
-    }
-
-    if (!saveSamResultAnnotations(result, labelName)) {
-        return;
-    }
+    m_inferenceBusy = true;
+    statusBar()->showMessage(QString::fromUtf8(u8"模型正在按点推理"));
+    QMetaObject::invokeMethod(m_inferenceWorker, "inferByPoint", Qt::QueuedConnection,
+                              Q_ARG(QPointF, imagePoint),
+                              Q_ARG(QString, labelName),
+                              Q_ARG(QString, m_currentImagePath));
 }
 
 void MainWindow::onRectPromptRequested(const QRectF& imageRect) {
@@ -622,8 +735,11 @@ void MainWindow::onRectPromptRequested(const QRectF& imageRect) {
         return;
     }
 
-    if (!m_bridge->isInitialized()) {
-        statusBar()->showMessage(QString::fromUtf8(u8"推理模型未初始化"));
+    if (!ensureModelReadyForInference()) {
+        return;
+    }
+    if (m_inferenceBusy) {
+        statusBar()->showMessage(QString::fromUtf8(u8"模型正在推理，请稍后"));
         return;
     }
 
@@ -635,28 +751,12 @@ void MainWindow::onRectPromptRequested(const QRectF& imageRect) {
         return;
     }
 
-    SamInferResult result;
-    try {
-        result = m_bridge->inferByRect(imageRect, labelName);
-    } catch (const std::exception& ex) {
-        statusBar()->showMessage(QString::fromUtf8(u8"推理异常"));
-        appendLog(QStringLiteral("[InferByRect] exception: %1").arg(ex.what()));
-        return;
-    } catch (...) {
-        statusBar()->showMessage(QString::fromUtf8(u8"推理异常"));
-        appendLog(QStringLiteral("[InferByRect] unknown exception"));
-        return;
-    }
-
-    if (!result.success) {
-        statusBar()->showMessage(QString::fromUtf8(u8"推理失败"));
-        appendLog(QStringLiteral("[InferByRect] %1").arg(result.errorMessage));
-        return;
-    }
-
-    if (!saveSamResultAnnotations(result, labelName)) {
-        return;
-    }
+    m_inferenceBusy = true;
+    statusBar()->showMessage(QString::fromUtf8(u8"模型正在按框推理"));
+    QMetaObject::invokeMethod(m_inferenceWorker, "inferByRect", Qt::QueuedConnection,
+                              Q_ARG(QRectF, imageRect),
+                              Q_ARG(QString, labelName),
+                              Q_ARG(QString, m_currentImagePath));
 }
 
 void MainWindow::onAnnotationSelectionChanged(int annotationIndex) {
@@ -668,6 +768,69 @@ void MainWindow::onAnnotationSelectionChanged(int annotationIndex) {
 
 void MainWindow::onImageViewportChanged(const QString& statusText) {
     setImageStatusText(statusText);
+}
+
+void MainWindow::onSamInitializeFinished(bool success, const QString& errorMessage) {
+    m_modelInitializing = false;
+    ui->initButton->setEnabled(true);
+    if (m_startupOverlay && m_automaticInitialization) {
+        m_startupOverlay->hideOverlay();
+    }
+    m_automaticInitialization = false;
+    applyNativeTitleBarTheme();
+
+    if (!success) {
+        m_modelInitialized = false;
+        setModelStatusText(QString::fromUtf8(u8"模型初始化失败"));
+        statusBar()->showMessage(QString::fromUtf8(u8"模型初始化失败"));
+        appendLog(QStringLiteral("[Init] %1").arg(errorMessage));
+        return;
+    }
+
+    m_modelInitialized = true;
+    setModelStatusText(QString::fromUtf8(u8"模型已就绪"));
+    statusBar()->showMessage(QString::fromUtf8(u8"模型初始化成功"));
+    appendLog(QStringLiteral("[Init] model initialized"));
+    requestSetCurrentImageForWorker();
+}
+
+void MainWindow::onSamCurrentImageFinished(const QString& imagePath, bool success, const QString& errorMessage) {
+    if (imagePath != m_currentImagePath) {
+        return;
+    }
+    if (!success) {
+        if (imagePath == m_pendingWorkerImagePath) {
+            m_pendingWorkerImagePath.clear();
+        }
+        statusBar()->showMessage(QString::fromUtf8(u8"设置图像失败"));
+        appendLog(QStringLiteral("[SetCurrentImage] %1").arg(errorMessage));
+        return;
+    }
+    m_workerCurrentImagePath = imagePath;
+    m_pendingWorkerImagePath.clear();
+    statusBar()->showMessage(QString::fromUtf8(u8"图像已同步到 SAM3"));
+}
+
+void MainWindow::onSamPointInferenceFinished(const SamInferResult& result, const QString& labelName,
+                                             const QString& imagePath) {
+    m_inferenceBusy = false;
+    if (!result.success) {
+        statusBar()->showMessage(QString::fromUtf8(u8"推理失败"));
+        appendLog(QStringLiteral("[InferByPoint] %1").arg(result.errorMessage));
+        return;
+    }
+    saveSamResultAnnotations(result, labelName, imagePath);
+}
+
+void MainWindow::onSamRectInferenceFinished(const SamInferResult& result, const QString& labelName,
+                                            const QString& imagePath) {
+    m_inferenceBusy = false;
+    if (!result.success) {
+        statusBar()->showMessage(QString::fromUtf8(u8"推理失败"));
+        appendLog(QStringLiteral("[InferByRect] %1").arg(result.errorMessage));
+        return;
+    }
+    saveSamResultAnnotations(result, labelName, imagePath);
 }
 
 void MainWindow::setupConnections() {
@@ -687,6 +850,8 @@ void MainWindow::setupConnections() {
     connect(ui->fixAnnotationButton, &QPushButton::clicked, this, &MainWindow::onFixAnnotationClicked);
 
     connect(ui->imageList, &QListWidget::currentRowChanged, this, &MainWindow::onImageSelectionChanged);
+    connect(ui->checkBox_HideLabel, &QCheckBox::toggled, ui->imageWidget,
+            &ImageAnnotateWidget::setShowAnnotationLabels);
 
     connect(ui->imageWidget, &ImageAnnotateWidget::pointPromptRequested, this, &MainWindow::onPointPromptRequested);
     connect(ui->imageWidget, &ImageAnnotateWidget::rectPromptRequested, this, &MainWindow::onRectPromptRequested);
@@ -705,10 +870,11 @@ void MainWindow::appendLog(const QString& message) {
 
 void MainWindow::updateWindowTitle() {
     if (m_workingDir.isEmpty()) {
-        setWindowTitle(QString::fromUtf8(u8"首图半自动标注软件"));
+        setWindowTitle(QString::fromUtf8(u8"颖图半自动标注软件"));
     } else {
-        setWindowTitle(QString::fromUtf8(u8"首图半自动标注软件 [%1]").arg(QDir::toNativeSeparators(m_workingDir)));
+        setWindowTitle(QString::fromUtf8(u8"颖图半自动标注软件 [%1]").arg(QDir::toNativeSeparators(m_workingDir)));
     }
+    applyNativeTitleBarTheme();
 }
 
 void MainWindow::setWorkingDirectory(const QString& folderPath) {
@@ -775,20 +941,15 @@ bool MainWindow::loadImageByPath(const QString& imagePath) {
         return false;
     }
 
-    if (!m_bridge->isInitialized()) {
+    if (m_modelInitialized) {
+        requestSetCurrentImageForWorker();
+        statusBar()->showMessage(QString::fromUtf8(u8"图像已加载，正在同步到 SAM3"));
+    } else if (m_modelInitializing) {
+        statusBar()->showMessage(QString::fromUtf8(u8"图像已加载，模型正在初始化"));
+    } else {
         statusBar()->showMessage(QString::fromUtf8(u8"图像已加载，推理模型未初始化"));
-        updateStatusSummary();
-        return true;
     }
 
-    QString error;
-    if (!m_bridge->setCurrentImage(imagePath, &error)) {
-        statusBar()->showMessage(QString::fromUtf8(u8"设置图像失败"));
-        appendLog(QStringLiteral("[SetCurrentImage] %1").arg(error));
-        return false;
-    }
-
-    statusBar()->showMessage(QString::fromUtf8(u8"图像已加载"));
     updateStatusSummary();
     return true;
 }
@@ -1002,14 +1163,14 @@ QList<AnnotationObject> MainWindow::annotationsFromSamResult(const SamInferResul
     QList<AnnotationObject> annotations;
     if (!result.success) {
         if (errorMessage) {
-            *errorMessage = result.errorMessage.isEmpty() ? QStringLiteral("SAM3 inference failed.") : result.errorMessage;
+            *errorMessage = result.errorMessage.isEmpty() ? QStringLiteral("model inference failed.") : result.errorMessage;
         }
         return annotations;
     }
 
     for (const SamObjectResult& object : result.objects) {
         if (!object.success) {
-            appendLog(QStringLiteral("[SAM3 Result] skip unsuccessful object: %1").arg(object.errorMessage));
+            appendLog(QStringLiteral("[AI Result] skip unsuccessful object: %1").arg(object.errorMessage));
             continue;
         }
 
@@ -1018,7 +1179,7 @@ QList<AnnotationObject> MainWindow::annotationsFromSamResult(const SamInferResul
             rect = polygonFromRoiData(object.roiData);
         }
         if (rect.size() != 4) {
-            appendLog(QStringLiteral("[SAM3 Result] skip object with invalid geometry, score=%1").arg(object.score));
+            appendLog(QStringLiteral("[AI Result] skip object with invalid geometry, score=%1").arg(object.score));
             continue;
         }
 
@@ -1035,25 +1196,35 @@ QList<AnnotationObject> MainWindow::annotationsFromSamResult(const SamInferResul
     return annotations;
 }
 
-bool MainWindow::saveSamResultAnnotations(const SamInferResult& result, const QString& labelName) {
+bool MainWindow::saveSamResultAnnotations(const SamInferResult& result, const QString& labelName,
+                                          const QString& imagePath) {
+    const QString targetImagePath = imagePath.isEmpty() ? m_currentImagePath : imagePath;
+    if (targetImagePath.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"未选择图像"));
+        appendLog(QStringLiteral("[AI SaveResult] target image path is empty."));
+        return false;
+    }
+
     QString error;
     const QList<AnnotationObject> newAnnotations = annotationsFromSamResult(result, labelName, &error);
     if (newAnnotations.isEmpty()) {
         statusBar()->showMessage(QString::fromUtf8(u8"推理结果无有效目标"));
-        appendLog(QStringLiteral("[SAM3 SaveResult] %1").arg(error));
+        appendLog(QStringLiteral("[AI SaveResult] %1").arg(error));
         return false;
     }
 
-    if (!AnnotationJsonIO::appendAnnotations(m_currentImagePath, newAnnotations, &error)) {
-        statusBar()->showMessage(QString::fromUtf8(u8"保存 SAM3 标注失败"));
-        appendLog(QStringLiteral("[SAM3 SaveResult] %1").arg(error));
+    if (!AnnotationJsonIO::appendAnnotations(targetImagePath, newAnnotations, &error)) {
+        statusBar()->showMessage(QString::fromUtf8(u8"保存AI标注失败"));
+        appendLog(QStringLiteral("[AI SaveResult] %1").arg(error));
         return false;
     }
 
-    ui->imageWidget->clearTempResult();
-    reloadAnnotationsForCurrentImage();
-    statusBar()->showMessage(QString::fromUtf8(u8"SAM3 已保存 %1 个目标").arg(newAnnotations.size()));
-    appendLog(QStringLiteral("[SAM3 SaveResult] appended %1 annotations with label %2")
+    if (targetImagePath == m_currentImagePath) {
+        ui->imageWidget->clearTempResult();
+        reloadAnnotationsForCurrentImage();
+    }
+    statusBar()->showMessage(QString::fromUtf8(u8"AI已保存 %1 个目标").arg(newAnnotations.size()));
+    appendLog(QStringLiteral("[AI SaveResult] appended %1 annotations with label %2")
                   .arg(newAnnotations.size())
                   .arg(labelName));
     return true;

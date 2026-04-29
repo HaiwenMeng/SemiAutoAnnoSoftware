@@ -22,6 +22,7 @@ public:
     void setTempResult(const TempInferenceResult& result);
     void setAnnotations(const QList<AnnotationObject>& annotations);
     void setSelectedAnnotationIndex(int index);
+    void setShowAnnotationLabels(bool show);
     QString viewportStatusText() const;
 
 signals:
@@ -53,6 +54,7 @@ private:
     QImage m_image;
     QList<AnnotationObject> m_annotations;
     int m_selectedAnnotationIndex = -1;
+    bool m_showAnnotationLabels = true;
 
     TempInferenceResult m_tempResult;
 
