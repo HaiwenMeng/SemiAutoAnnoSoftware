@@ -8,6 +8,11 @@
 
 class AnnotationJsonIO {
 public:
+    static QString annotationFilePath(const QString& imagePath);
+    static bool hasValidAnnotations(const QString& imagePath, bool* hasAnnotations, QString* errorMessage = nullptr);
+    static bool removeAnnotationFile(const QString& imagePath, QString* errorMessage = nullptr);
+    static bool annotationFileContainsLabel(const QString& imagePath, const QString& labelName, bool* containsLabel,
+                                            QString* errorMessage = nullptr);
     static bool loadAnnotations(const QString& imagePath, QList<AnnotationObject>* annotations, QString* errorMessage = nullptr);
     static bool appendAnnotation(const QString& imagePath, const AnnotationObject& annotation, QString* errorMessage = nullptr);
     static bool appendAnnotations(const QString& imagePath, const QList<AnnotationObject>& annotations,

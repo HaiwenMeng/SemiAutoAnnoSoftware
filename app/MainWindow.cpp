@@ -34,6 +34,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QShortcut>
+#include <QSignalBlocker>
 
 #include "app/StartupOverlay.h"
 #include "app/UiTheme.h"
@@ -216,7 +217,12 @@ void MainWindow::setupCommercialWorkspace() {
     auto* leftLayout = new QVBoxLayout(leftPanel);
     leftLayout->setContentsMargins(10, 10, 10, 10);
     leftLayout->setSpacing(8);
-    leftLayout->addWidget(ui->label_2);
+    auto* imageHeaderLayout = new QHBoxLayout();
+    imageHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    imageHeaderLayout->setSpacing(8);
+    imageHeaderLayout->addWidget(ui->label_2);
+    imageHeaderLayout->addWidget(ui->comboBox_selectImg);
+    leftLayout->addLayout(imageHeaderLayout);
     leftLayout->addWidget(ui->imageList, 1);
 
     auto* centerHost = new QWidget(splitter);
@@ -276,8 +282,8 @@ void MainWindow::setupCommercialWorkspace() {
     splitter->setSizes(QList<int>() << 260 << 760 << 300);
     root->addWidget(splitter, 1);
 
-    if (ui->splitter) {
-        ui->splitter->hide();
+    if (auto* oldSplitter = ui->centralWidget->findChild<QSplitter*>(QStringLiteral("splitter"))) {
+        oldSplitter->hide();
     }
 }
 
@@ -351,6 +357,26 @@ void MainWindow::applyNativeTitleBarTheme() {
     });
 }
 
+void MainWindow::ensureImageFilterItems() {
+    if (ui->comboBox_selectImg == nullptr) {
+        return;
+    }
+
+    const QStringList items = {
+        QString::fromUtf8(u8"全部"),
+        QString::fromUtf8(u8"已标注"),
+        QString::fromUtf8(u8"未标注"),
+        QString::fromUtf8(u8"含当前标签")
+    };
+
+    QSignalBlocker blocker(ui->comboBox_selectImg);
+    ui->comboBox_selectImg->clear();
+    for (const QString& item : items) {
+        ui->comboBox_selectImg->addItem(item);
+    }
+    ui->comboBox_selectImg->setCurrentIndex(0);
+}
+
 void MainWindow::applyStaticTextAndIcons() {
     setWindowIcon(QIcon(QStringLiteral(":/assets/icons/app.svg")));
     ui->label_2->setText(QString::fromUtf8(u8"图片列表"));
@@ -364,6 +390,7 @@ void MainWindow::applyStaticTextAndIcons() {
     markSectionTitle(ui->label_2);
     markSectionTitle(ui->labelTitle);
     markSectionTitle(ui->annTitle);
+    ensureImageFilterItems();
 
     if (ui->comboBox_AnnoMode->count() < 4) {
         ui->comboBox_AnnoMode->clear();
@@ -500,7 +527,11 @@ void MainWindow::onImageSelectionChanged(int row) {
         return;
     }
 
-    loadImageByPath(m_imageFilePaths.at(row));
+    const QString nextImagePath = m_imageFilePaths.at(row);
+    if (!m_currentImagePath.isEmpty() && nextImagePath != m_currentImagePath && m_annotations.isEmpty()) {
+        cleanupEmptyAnnotationFile(m_currentImagePath, QStringLiteral("SwitchImage"));
+    }
+    loadImageByPath(nextImagePath);
 }
 
 void MainWindow::onDeleteAnnotationClicked() {
@@ -524,6 +555,10 @@ void MainWindow::onDeleteAnnotationClicked() {
     }
 
     reloadAnnotationsForCurrentImage();
+    if (m_annotations.isEmpty()) {
+        cleanupEmptyAnnotationFile(m_currentImagePath, QStringLiteral("RemoveAnnotation"));
+    }
+    refreshImageList();
     statusBar()->showMessage(QString::fromUtf8(u8"标注已删除"));
 }
 
@@ -561,6 +596,7 @@ void MainWindow::onFixAnnotationClicked() {
     }
 
     reloadAnnotationsForCurrentImage();
+    refreshImageList();
     statusBar()->showMessage(QString::fromUtf8(u8"标注已修改"));
 }
 
@@ -631,13 +667,17 @@ void MainWindow::onClearAllAnnotationsClicked() {
     }
 
     QString error;
-    if (!AnnotationJsonIO::clearAnnotations(m_currentImagePath, &error)) {
+    if (!AnnotationJsonIO::removeAnnotationFile(m_currentImagePath, &error)) {
         statusBar()->showMessage(QString::fromUtf8(u8"清空标注失败"));
         appendLog(QStringLiteral("[ClearAllAnnotations] %1").arg(error));
         return;
     }
 
-    reloadAnnotationsForCurrentImage();
+    m_annotations.clear();
+    ui->imageWidget->setAnnotations(m_annotations);
+    ui->imageWidget->clearTempResult();
+    refreshAnnotationList();
+    refreshImageList();
     statusBar()->showMessage(QString::fromUtf8(u8"当前图像标注已清空"));
 }
 
@@ -684,7 +724,6 @@ void MainWindow::onDeleteCurrentImageClicked() {
         return;
     }
 
-    const int oldRow = ui->imageList->currentRow();
     if (!QFile::remove(imagePath)) {
         statusBar()->showMessage(QString::fromUtf8(u8"删除图像失败"));
         appendLog(QStringLiteral("[DeleteImage] failed to delete image: %1").arg(imagePath));
@@ -706,8 +745,6 @@ void MainWindow::onDeleteCurrentImageClicked() {
         return;
     }
 
-    const int nextRow = qBound(0, oldRow, m_imageFilePaths.size() - 1);
-    ui->imageList->setCurrentRow(nextRow);
     statusBar()->showMessage(jsonDeleteFailed
         ? QString::fromUtf8(u8"图像已删除，但对应 JSON 删除失败")
         : QString::fromUtf8(u8"图像已删除"));
@@ -783,6 +820,18 @@ void MainWindow::onAnnotationModeChanged(int index) {
     Q_UNUSED(index);
     clearPendingMultiRects();
     updateModeControls();
+}
+
+void MainWindow::onImageFilterChanged(int index) {
+    Q_UNUSED(index);
+    refreshImageList();
+}
+
+void MainWindow::onCurrentLabelFilterChanged(int index) {
+    Q_UNUSED(index);
+    if (currentImageFilterMode() == ImageFilterMode::ContainsCurrentLabel) {
+        refreshImageList();
+    }
 }
 
 void MainWindow::onPointPromptRequested(const QPointF& imagePoint) {
@@ -1004,6 +1053,10 @@ void MainWindow::setupConnections() {
     connect(ui->imageList, &QListWidget::currentRowChanged, this, &MainWindow::onImageSelectionChanged);
     connect(ui->comboBox_AnnoMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onAnnotationModeChanged);
+    connect(ui->comboBox_selectImg, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onImageFilterChanged);
+    connect(ui->comboBox_CurrentLabel, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onCurrentLabelFilterChanged);
     connect(ui->checkBox_HideLabel, &QCheckBox::toggled, ui->imageWidget,
             &ImageAnnotateWidget::setShowAnnotationLabels);
 
@@ -1046,17 +1099,15 @@ void MainWindow::setWorkingDirectory(const QString& folderPath) {
     refreshLabelList();
 
     refreshImageList();
-    if (!m_imageFilePaths.isEmpty()) {
-        ui->imageWidget->setVisible(true);
-        ui->imageList->setCurrentRow(0);
-    } else {
-        clearCurrentImageState();
-    }
     updateStatusSummary();
 }
 
 void MainWindow::refreshImageList() {
+    const QString previousCurrentImagePath = m_currentImagePath;
+    QSignalBlocker blocker(ui->imageList);
+
     ui->imageList->clear();
+    m_allImageFilePaths.clear();
     m_imageFilePaths.clear();
 
     if (m_workingDir.isEmpty()) {
@@ -1068,11 +1119,114 @@ void MainWindow::refreshImageList() {
     const QStringList filters = {QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.png"), QStringLiteral("*.bmp")};
     const QFileInfoList files = dir.entryInfoList(filters, QDir::Files | QDir::Readable | QDir::NoSymLinks, QDir::Name);
 
+    const ImageFilterMode filterMode = currentImageFilterMode();
+    const QString currentLabel = ui->comboBox_CurrentLabel->currentText();
+    const bool missingLabelForFilter = filterMode == ImageFilterMode::ContainsCurrentLabel && currentLabel.isEmpty();
+    int rowToKeep = -1;
+
     for (const QFileInfo& fi : files) {
-        m_imageFilePaths.push_back(fi.absoluteFilePath());
-        ui->imageList->addItem(fi.fileName());
+        const QString imagePath = fi.absoluteFilePath();
+        m_allImageFilePaths.push_back(imagePath);
+
+        bool hasAnnotations = false;
+        QString error;
+        if (!AnnotationJsonIO::hasValidAnnotations(imagePath, &hasAnnotations, &error)) {
+            appendLog(QStringLiteral("[ImageList] failed to inspect annotations for %1: %2").arg(imagePath, error));
+            hasAnnotations = false;
+        }
+
+        bool visible = false;
+        switch (filterMode) {
+        case ImageFilterMode::Annotated:
+            visible = hasAnnotations;
+            break;
+        case ImageFilterMode::Unannotated:
+            visible = !hasAnnotations;
+            break;
+        case ImageFilterMode::ContainsCurrentLabel: {
+            if (!missingLabelForFilter) {
+                bool containsLabel = false;
+                if (!AnnotationJsonIO::annotationFileContainsLabel(imagePath, currentLabel, &containsLabel, &error)) {
+                    appendLog(QStringLiteral("[ImageList] failed to inspect label for %1: %2").arg(imagePath, error));
+                    containsLabel = false;
+                }
+                visible = containsLabel;
+            }
+            break;
+        }
+        case ImageFilterMode::All:
+        default:
+            visible = true;
+            break;
+        }
+
+        if (!visible) {
+            continue;
+        }
+
+        if (imagePath == previousCurrentImagePath) {
+            rowToKeep = m_imageFilePaths.size();
+        }
+
+        m_imageFilePaths.push_back(imagePath);
+        auto* item = new QListWidgetItem(QIcon(hasAnnotations
+                                                   ? QStringLiteral(":/assets/icons/status-checked.svg")
+                                                   : QStringLiteral(":/assets/icons/status-unchecked.svg")),
+                                         fi.fileName());
+        ui->imageList->addItem(item);
     }
+
+    if (rowToKeep >= 0) {
+        ui->imageList->setCurrentRow(rowToKeep);
+    }
+
+    blocker.unblock();
+
+    if (m_imageFilePaths.isEmpty()) {
+        clearCurrentImageState();
+        if (missingLabelForFilter) {
+            statusBar()->showMessage(QString::fromUtf8(u8"请先选择当前标签"));
+        } else if (!m_allImageFilePaths.isEmpty()) {
+            statusBar()->showMessage(QString::fromUtf8(u8"当前筛选条件下没有图片"));
+        }
+        return;
+    }
+
+    if (rowToKeep < 0) {
+        ui->imageList->setCurrentRow(0);
+    }
+
     updateStatusSummary();
+}
+
+bool MainWindow::cleanupEmptyAnnotationFile(const QString& imagePath, const QString& reason) {
+    if (imagePath.isEmpty()) {
+        return true;
+    }
+
+    const QString jsonPath = AnnotationJsonIO::annotationFilePath(imagePath);
+    if (!QFileInfo::exists(jsonPath)) {
+        return true;
+    }
+
+    QList<AnnotationObject> annotations;
+    QString error;
+    if (!AnnotationJsonIO::loadAnnotations(imagePath, &annotations, &error)) {
+        appendLog(QStringLiteral("[%1] keep unreadable annotation file %2: %3").arg(reason, jsonPath, error));
+        return false;
+    }
+
+    if (!annotations.isEmpty()) {
+        return true;
+    }
+
+    if (!AnnotationJsonIO::removeAnnotationFile(imagePath, &error)) {
+        appendLog(QStringLiteral("[%1] failed to delete empty annotation file %2: %3").arg(reason, jsonPath, error));
+        return false;
+    }
+
+    appendLog(QStringLiteral("[%1] deleted empty annotation file: %2").arg(reason, jsonPath));
+    return true;
 }
 
 bool MainWindow::loadImageByPath(const QString& imagePath) {
@@ -1093,6 +1247,9 @@ bool MainWindow::loadImageByPath(const QString& imagePath) {
 
     if (!reloadAnnotationsForCurrentImage()) {
         return false;
+    }
+    if (m_annotations.isEmpty()) {
+        cleanupEmptyAnnotationFile(m_currentImagePath, QStringLiteral("LoadImage"));
     }
     syncImageStatusText();
 
@@ -1349,6 +1506,20 @@ MainWindow::AnnotationMode MainWindow::currentAnnotationMode() const {
     }
 }
 
+MainWindow::ImageFilterMode MainWindow::currentImageFilterMode() const {
+    switch (ui->comboBox_selectImg->currentIndex()) {
+    case 1:
+        return ImageFilterMode::Annotated;
+    case 2:
+        return ImageFilterMode::Unannotated;
+    case 3:
+        return ImageFilterMode::ContainsCurrentLabel;
+    case 0:
+    default:
+        return ImageFilterMode::All;
+    }
+}
+
 bool MainWindow::isAutoAnnotationMode() const {
     return currentAnnotationMode() == AnnotationMode::Auto;
 }
@@ -1415,6 +1586,7 @@ bool MainWindow::saveManualRectAnnotation(const QRectF& imageRect, const QString
 
     ui->imageWidget->clearTempResult();
     reloadAnnotationsForCurrentImage();
+    refreshImageList();
     statusBar()->showMessage(QString::fromUtf8(u8"手动标注已保存"));
     return true;
 }
@@ -1507,6 +1679,7 @@ bool MainWindow::saveSamResultAnnotations(const SamInferResult& result, const QS
         return false;
     }
     statusBar()->showMessage(QString::fromUtf8(u8"AI已保存 %1 个目标").arg(newAnnotations.size()));
+    refreshImageList();
     appendLog(QStringLiteral("[AI SaveResult] appended %1 annotations with label %2")
                   .arg(newAnnotations.size())
                   .arg(labelName));

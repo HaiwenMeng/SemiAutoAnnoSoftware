@@ -15,5 +15,7 @@
         <file>assets/icons/plus.svg</file>
         <file>assets/icons/edit.svg</file>
         <file>assets/icons/eraser.svg</file>
+        <file>assets/icons/status-checked.svg</file>
+        <file>assets/icons/status-unchecked.svg</file>
     </qresource>
 </RCC>

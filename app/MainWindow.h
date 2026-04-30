@@ -45,6 +45,8 @@ private slots:
     void onInferByRectsClicked();
     void onClearRectsClicked();
     void onAnnotationModeChanged(int index);
+    void onImageFilterChanged(int index);
+    void onCurrentLabelFilterChanged(int index);
 
     void onPointPromptRequested(const QPointF& imagePoint);
     void onRectPromptRequested(const QRectF& imageRect);
@@ -78,6 +80,8 @@ private:
     void setWorkingDirectory(const QString& folderPath);
     void refreshImageList();
     bool loadImageByPath(const QString& imagePath);
+    bool cleanupEmptyAnnotationFile(const QString& imagePath, const QString& reason);
+    void ensureImageFilterItems();
 
     bool loadLabelConfig();
     bool saveLabelConfig();
@@ -96,6 +100,13 @@ private:
         MultiTarget
     };
     AnnotationMode currentAnnotationMode() const;
+    enum class ImageFilterMode {
+        All,
+        Annotated,
+        Unannotated,
+        ContainsCurrentLabel
+    };
+    ImageFilterMode currentImageFilterMode() const;
     bool isAutoAnnotationMode() const;
     void updateModeControls();
     void clearPendingMultiRects();
@@ -116,6 +127,7 @@ private:
     StartupOverlay* m_startupOverlay = nullptr;
 
     QString m_workingDir;
+    QStringList m_allImageFilePaths;
     QStringList m_imageFilePaths;
     QString m_currentImagePath;
     QString m_workerCurrentImagePath;

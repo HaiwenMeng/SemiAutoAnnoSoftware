@@ -161,6 +161,83 @@ QString AnnotationJsonIO::jsonPathFromImagePath(const QString& imagePath) {
     return info.absolutePath() + QLatin1Char('/') + info.completeBaseName() + QStringLiteral(".json");
 }
 
+QString AnnotationJsonIO::annotationFilePath(const QString& imagePath) {
+    return jsonPathFromImagePath(imagePath);
+}
+
+bool AnnotationJsonIO::hasValidAnnotations(const QString& imagePath, bool* hasAnnotations, QString* errorMessage) {
+    if (hasAnnotations == nullptr) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Internal error: null hasAnnotations");
+        }
+        return false;
+    }
+
+    *hasAnnotations = false;
+    const QString jsonPath = jsonPathFromImagePath(imagePath);
+    if (!QFileInfo::exists(jsonPath)) {
+        return true;
+    }
+
+    QList<AnnotationObject> annotations;
+    if (!loadAnnotations(imagePath, &annotations, errorMessage)) {
+        return false;
+    }
+
+    *hasAnnotations = !annotations.isEmpty();
+    return true;
+}
+
+bool AnnotationJsonIO::removeAnnotationFile(const QString& imagePath, QString* errorMessage) {
+    const QString jsonPath = jsonPathFromImagePath(imagePath);
+    if (!QFileInfo::exists(jsonPath)) {
+        return true;
+    }
+
+    if (!QFile::remove(jsonPath)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Failed to delete json: %1").arg(jsonPath);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool AnnotationJsonIO::annotationFileContainsLabel(const QString& imagePath, const QString& labelName, bool* containsLabel,
+                                                   QString* errorMessage) {
+    if (containsLabel == nullptr) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Internal error: null containsLabel");
+        }
+        return false;
+    }
+
+    *containsLabel = false;
+    if (labelName.isEmpty()) {
+        return true;
+    }
+
+    const QString jsonPath = jsonPathFromImagePath(imagePath);
+    if (!QFileInfo::exists(jsonPath)) {
+        return true;
+    }
+
+    QList<AnnotationObject> annotations;
+    if (!loadAnnotations(imagePath, &annotations, errorMessage)) {
+        return false;
+    }
+
+    for (const AnnotationObject& annotation : annotations) {
+        if (annotation.label == labelName) {
+            *containsLabel = true;
+            return true;
+        }
+    }
+
+    return true;
+}
+
 bool AnnotationJsonIO::loadAnnotations(const QString& imagePath, QList<AnnotationObject>* annotations, QString* errorMessage) {
     if (annotations == nullptr) {
         if (errorMessage) {
@@ -242,6 +319,10 @@ bool AnnotationJsonIO::appendAnnotations(const QString& imagePath, const QList<A
 
 bool AnnotationJsonIO::replaceAnnotations(const QString& imagePath, const QList<AnnotationObject>& annotations,
                                           QString* errorMessage) {
+    if (annotations.isEmpty()) {
+        return removeAnnotationFile(imagePath, errorMessage);
+    }
+
     const QString jsonPath = jsonPathFromImagePath(imagePath);
 
     QJsonObject root;
@@ -267,16 +348,7 @@ bool AnnotationJsonIO::replaceAnnotations(const QString& imagePath, const QList<
 }
 
 bool AnnotationJsonIO::clearAnnotations(const QString& imagePath, QString* errorMessage) {
-    const QString jsonPath = jsonPathFromImagePath(imagePath);
-
-    QJsonObject root;
-    if (!loadRootObject(jsonPath, imagePath, &root, errorMessage)) {
-        return false;
-    }
-
-    refreshImageFields(&root, imagePath);
-    root.insert(QStringLiteral("shapes"), QJsonArray());
-    return saveRootObject(jsonPath, root, errorMessage);
+    return removeAnnotationFile(imagePath, errorMessage);
 }
 
 bool AnnotationJsonIO::removeAnnotationByIndex(const QString& imagePath, int shapeIndex, QString* errorMessage) {
@@ -303,6 +375,10 @@ bool AnnotationJsonIO::removeAnnotationByIndex(const QString& imagePath, int sha
     }
 
     shapes.removeAt(shapeIndex);
+    if (shapes.isEmpty()) {
+        return removeAnnotationFile(imagePath, errorMessage);
+    }
+
     root.insert(QStringLiteral("shapes"), shapes);
 
     return saveRootObject(jsonPath, root, errorMessage);
