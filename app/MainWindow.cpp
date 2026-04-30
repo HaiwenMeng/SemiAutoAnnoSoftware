@@ -421,7 +421,7 @@ void MainWindow::startSamInitialization(bool automatic) {
         return;
     }
     if (m_modelInitializing) {
-        statusBar()->showMessage(QString::fromUtf8(u8"SAM3正在初始化"));
+        statusBar()->showMessage(QString::fromUtf8(u8"模型正在初始化"));
         return;
     }
     if (!m_inferenceWorker) {
@@ -439,7 +439,7 @@ void MainWindow::startSamInitialization(bool automatic) {
     statusBar()->showMessage(QString::fromUtf8(u8"模型正在后台初始化"));
 
     if (automatic && m_startupOverlay) {
-        m_startupOverlay->showMessage(QString::fromUtf8(u8"正在初始化 SAM3"),
+        m_startupOverlay->showMessage(QString::fromUtf8(u8"正在初始化模型"),
                                       QString::fromUtf8(u8"请等待初始化完成..."));
     }
 
@@ -466,7 +466,7 @@ bool MainWindow::ensureModelReadyForInference() {
             return true;
         }
         requestSetCurrentImageForWorker();
-        statusBar()->showMessage(QString::fromUtf8(u8"当前图像正在同步到 SAM3，请稍后再试"));
+        statusBar()->showMessage(QString::fromUtf8(u8"当前图像正在同步到模型，请稍后再试"));
         return false;
     }
     if (m_modelInitializing) {
@@ -934,7 +934,7 @@ void MainWindow::onSamCurrentImageFinished(const QString& imagePath, bool succes
     }
     m_workerCurrentImagePath = imagePath;
     m_pendingWorkerImagePath.clear();
-    statusBar()->showMessage(QString::fromUtf8(u8"图像已同步到 SAM3"));
+    statusBar()->showMessage(QString::fromUtf8(u8"图像已同步到模型"));
 }
 
 void MainWindow::onSamPointInferenceFinished(const SamInferResult& result, const QString& labelName,
@@ -1098,7 +1098,7 @@ bool MainWindow::loadImageByPath(const QString& imagePath) {
 
     if (m_modelInitialized) {
         requestSetCurrentImageForWorker();
-        statusBar()->showMessage(QString::fromUtf8(u8"图像已加载，正在同步到 SAM3"));
+        statusBar()->showMessage(QString::fromUtf8(u8"图像已加载，正在同步到模型"));
     } else if (m_modelInitializing) {
         statusBar()->showMessage(QString::fromUtf8(u8"图像已加载，模型正在初始化"));
     } else {
