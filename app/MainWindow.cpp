@@ -3,6 +3,7 @@
 #include <exception>
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDesktopServices>
@@ -45,6 +46,8 @@
 #include "ui_MainWindow.h"
 
 namespace {
+constexpr double kNmsIouThreshold = 0.5;
+
 QPolygonF toAxisAlignedRectPolygon(const QPolygonF& poly) {
     if (poly.isEmpty()) {
         return {};
@@ -81,6 +84,28 @@ QPolygonF polygonFromRoiData(const QVector<double>& roiData) {
         poly << QPointF(roiData.at(i), roiData.at(i + 1));
     }
     return toAxisAlignedRectPolygon(poly);
+}
+
+QRectF rectFromAnnotation(const AnnotationObject& annotation) {
+    return toAxisAlignedRectPolygon(annotation.rectPolygonImage).boundingRect().normalized();
+}
+
+double rectIou(const QRectF& a, const QRectF& b) {
+    if (!a.isValid() || !b.isValid()) {
+        return 0.0;
+    }
+
+    const QRectF intersection = a.intersected(b);
+    if (!intersection.isValid() || intersection.width() <= 0.0 || intersection.height() <= 0.0) {
+        return 0.0;
+    }
+
+    const double intersectionArea = intersection.width() * intersection.height();
+    const double unionArea = a.width() * a.height() + b.width() * b.height() - intersectionArea;
+    if (unionArea <= 0.0) {
+        return 0.0;
+    }
+    return intersectionArea / unionArea;
 }
 
 QString jsonPathFromImagePath(const QString& imagePath) {
@@ -120,6 +145,7 @@ void configureActionButton(QPushButton* button, const QString& text, const QStri
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     qRegisterMetaType<SamInferResult>("SamInferResult");
+    qRegisterMetaType<QVector<QRectF>>("QVector<QRectF>");
 
     ui->setupUi(this);
     setupCommercialWorkspace();
@@ -208,6 +234,8 @@ void MainWindow::setupCommercialWorkspace() {
     navLayout->addStretch(1);
     navLayout->addWidget(ui->pushButton_firstImg);
     navLayout->addWidget(ui->PB_LastImg);
+    navLayout->addWidget(ui->pushButton_InferByRects);
+    navLayout->addWidget(ui->pushButton_ClearRects);
     navLayout->addWidget(ui->pushButton_deleteImg);
     navLayout->addWidget(ui->pushButton_nextImg);
     navLayout->addWidget(ui->pushButton_finalImg);
@@ -288,6 +316,8 @@ void MainWindow::setupInferenceWorker() {
             this, &MainWindow::onSamPointInferenceFinished);
     connect(m_inferenceWorker, &SamInferenceWorker::rectInferenceFinished,
             this, &MainWindow::onSamRectInferenceFinished);
+    connect(m_inferenceWorker, &SamInferenceWorker::rectsInferenceFinished,
+            this, &MainWindow::onSamRectsInferenceFinished);
 
     m_inferenceThread->start();
 }
@@ -335,18 +365,22 @@ void MainWindow::applyStaticTextAndIcons() {
     markSectionTitle(ui->labelTitle);
     markSectionTitle(ui->annTitle);
 
-    if (ui->comboBox_AnnoMode->count() < 2) {
+    if (ui->comboBox_AnnoMode->count() < 4) {
         ui->comboBox_AnnoMode->clear();
         ui->comboBox_AnnoMode->addItem(QString::fromUtf8(u8"自动"));
         ui->comboBox_AnnoMode->addItem(QString::fromUtf8(u8"手动"));
+        ui->comboBox_AnnoMode->addItem(QString::fromUtf8(u8"小目标"));
+        ui->comboBox_AnnoMode->addItem(QString::fromUtf8(u8"多目标"));
     } else {
         ui->comboBox_AnnoMode->setItemText(0, QString::fromUtf8(u8"自动"));
         ui->comboBox_AnnoMode->setItemText(1, QString::fromUtf8(u8"手动"));
+        ui->comboBox_AnnoMode->setItemText(2, QString::fromUtf8(u8"小目标"));
+        ui->comboBox_AnnoMode->setItemText(3, QString::fromUtf8(u8"多目标"));
     }
 
     configureActionButton(ui->openFolderButton, QString::fromUtf8(u8"打开文件夹"),
                           QStringLiteral(":/assets/icons/folder-open.svg"), QString::fromUtf8(u8"选择图片文件夹"));
-    configureActionButton(ui->initButton, QString::fromUtf8(u8"初始化 模型"),
+    configureActionButton(ui->initButton, QString::fromUtf8(u8"初始化模型"),
                           QStringLiteral(":/assets/icons/cpu.svg"), QString::fromUtf8(u8"初始化 模型 推理模型"));
     configureActionButton(ui->pushButton_5, QString::fromUtf8(u8"打开目录"),
                           QStringLiteral(":/assets/icons/folder-search.svg"), QString::fromUtf8(u8"在资源管理器中打开当前目录"));
@@ -354,6 +388,10 @@ void MainWindow::applyStaticTextAndIcons() {
                           QStringLiteral(":/assets/icons/chevrons-left.svg"), QString::fromUtf8(u8"跳转到第一张图片"));
     configureActionButton(ui->PB_LastImg, QString::fromUtf8(u8"上一张"),
                           QStringLiteral(":/assets/icons/chevron-left.svg"), QString::fromUtf8(u8"切换到上一张图片\n快捷键A"));
+    configureActionButton(ui->pushButton_InferByRects, QString::fromUtf8(u8"执行多框推理"),
+                          QStringLiteral(":/assets/icons/rects-stack.svg"), QString::fromUtf8(u8"对已绘制的多个提示框执行批量推理"));
+    configureActionButton(ui->pushButton_ClearRects, QString::fromUtf8(u8"清空多框"),
+                          QStringLiteral(":/assets/icons/eraser.svg"), QString::fromUtf8(u8"清空当前多目标待推理框"));
     configureActionButton(ui->pushButton_nextImg, QString::fromUtf8(u8"下一张"),
                           QStringLiteral(":/assets/icons/chevron-right.svg"), QString::fromUtf8(u8"切换到下一张图片\n快捷键D"));
     configureActionButton(ui->pushButton_finalImg, QString::fromUtf8(u8"最后一张"),
@@ -370,6 +408,7 @@ void MainWindow::applyStaticTextAndIcons() {
                           QStringLiteral(":/assets/icons/edit.svg"), QString::fromUtf8(u8"修改选中标注的标签"));
     configureActionButton(ui->pushButton_clearAllAnno, QString::fromUtf8(u8"清空当前图片标注"),
                           QStringLiteral(":/assets/icons/eraser.svg"), QString::fromUtf8(u8"清空当前图片的全部标注"), true);
+    updateModeControls();
 }
 
 void MainWindow::onInitializeBridgeClicked() {
@@ -438,12 +477,21 @@ bool MainWindow::ensureModelReadyForInference() {
     return false;
 }
 
+void MainWindow::syncImageStatusText() {
+    if (m_currentImagePath.isEmpty()) {
+        setImageStatusText(QString::fromUtf8(u8"未加载图像"));
+        return;
+    }
+    setImageStatusText(ui->imageWidget->viewportStatusText());
+}
+
 void MainWindow::onOpenFolderClicked() {
     const QString dir = QFileDialog::getExistingDirectory(this, QString::fromUtf8(u8"打开文件夹"), m_workingDir);
     if (dir.isEmpty()) {
         return;
     }
 
+    clearPendingMultiRects();
     setWorkingDirectory(dir);
 }
 
@@ -692,10 +740,62 @@ void MainWindow::onFinalImageClicked() {
     ui->imageList->setCurrentRow(m_imageFilePaths.size() - 1);
 }
 
+void MainWindow::onInferByRectsClicked() {
+    if (currentAnnotationMode() != AnnotationMode::MultiTarget) {
+        statusBar()->showMessage(QString::fromUtf8(u8"请先切换到多目标模式"));
+        return;
+    }
+    if (m_pendingMultiRects.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"请先绘制至少一个多目标提示框"));
+        return;
+    }
+    if (!ensureModelReadyForInference()) {
+        return;
+    }
+    if (m_inferenceBusy) {
+        statusBar()->showMessage(QString::fromUtf8(u8"模型正在推理，请稍后"));
+        return;
+    }
+
+    QString labelError;
+    const QString labelName = currentSelectedLabel(&labelError);
+    if (labelName.isEmpty()) {
+        statusBar()->showMessage(QString::fromUtf8(u8"未选择标签"));
+        appendLog(QStringLiteral("[InferByRects] %1").arg(labelError));
+        return;
+    }
+
+    m_inferenceBusy = true;
+    updateModeControls();
+    statusBar()->showMessage(QString::fromUtf8(u8"模型正在执行多框推理"));
+    QMetaObject::invokeMethod(m_inferenceWorker, "inferByRects", Qt::QueuedConnection,
+                              Q_ARG(QVector<QRectF>, m_pendingMultiRects),
+                              Q_ARG(QString, labelName),
+                              Q_ARG(QString, m_currentImagePath));
+}
+
+void MainWindow::onClearRectsClicked() {
+    clearPendingMultiRects();
+    statusBar()->showMessage(QString::fromUtf8(u8"已清空多目标提示框"));
+}
+
+void MainWindow::onAnnotationModeChanged(int index) {
+    Q_UNUSED(index);
+    clearPendingMultiRects();
+    updateModeControls();
+}
+
 void MainWindow::onPointPromptRequested(const QPointF& imagePoint) {
-    if (!isAutoAnnotationMode()) {
+    const AnnotationMode mode = currentAnnotationMode();
+    if (mode != AnnotationMode::Auto) {
         Q_UNUSED(imagePoint);
-        statusBar()->showMessage(QString::fromUtf8(u8"手动模式请拖拽矩形标注"));
+        if (mode == AnnotationMode::SmallTarget) {
+            statusBar()->showMessage(QString::fromUtf8(u8"小目标模式请拖拽矩形框进行局部推理"));
+        } else if (mode == AnnotationMode::MultiTarget) {
+            statusBar()->showMessage(QString::fromUtf8(u8"多目标模式请拖拽多个矩形框"));
+        } else {
+            statusBar()->showMessage(QString::fromUtf8(u8"手动模式请拖拽矩形标注"));
+        }
         return;
     }
 
@@ -716,6 +816,7 @@ void MainWindow::onPointPromptRequested(const QPointF& imagePoint) {
     }
 
     m_inferenceBusy = true;
+    updateModeControls();
     statusBar()->showMessage(QString::fromUtf8(u8"模型正在按点推理"));
     QMetaObject::invokeMethod(m_inferenceWorker, "inferByPoint", Qt::QueuedConnection,
                               Q_ARG(QPointF, imagePoint),
@@ -724,7 +825,8 @@ void MainWindow::onPointPromptRequested(const QPointF& imagePoint) {
 }
 
 void MainWindow::onRectPromptRequested(const QRectF& imageRect) {
-    if (!isAutoAnnotationMode()) {
+    const AnnotationMode mode = currentAnnotationMode();
+    if (mode == AnnotationMode::Manual) {
         QString labelError;
         const QString labelName = currentSelectedLabel(&labelError);
         if (labelName.isEmpty()) {
@@ -733,6 +835,20 @@ void MainWindow::onRectPromptRequested(const QRectF& imageRect) {
             return;
         }
         saveManualRectAnnotation(imageRect, labelName);
+        return;
+    }
+
+    if (mode == AnnotationMode::MultiTarget) {
+        const QRectF rect = imageRect.normalized();
+        if (!rect.isValid() || rect.width() < 2.0 || rect.height() < 2.0) {
+            statusBar()->showMessage(QString::fromUtf8(u8"多目标提示框太小"));
+            appendLog(QStringLiteral("[InferByRects] prompt rectangle is too small"));
+            return;
+        }
+        m_pendingMultiRects.push_back(rect);
+        ui->imageWidget->setPendingPromptRects(m_pendingMultiRects);
+        updateModeControls();
+        statusBar()->showMessage(QString::fromUtf8(u8"已添加第 %1 个多目标提示框").arg(m_pendingMultiRects.size()));
         return;
     }
 
@@ -753,11 +869,20 @@ void MainWindow::onRectPromptRequested(const QRectF& imageRect) {
     }
 
     m_inferenceBusy = true;
-    statusBar()->showMessage(QString::fromUtf8(u8"模型正在按框推理"));
-    QMetaObject::invokeMethod(m_inferenceWorker, "inferByRect", Qt::QueuedConnection,
-                              Q_ARG(QRectF, imageRect),
-                              Q_ARG(QString, labelName),
-                              Q_ARG(QString, m_currentImagePath));
+    updateModeControls();
+    if (mode == AnnotationMode::SmallTarget) {
+        statusBar()->showMessage(QString::fromUtf8(u8"模型正在执行小目标局部推理"));
+        QMetaObject::invokeMethod(m_inferenceWorker, "inferSmallTargetByRect", Qt::QueuedConnection,
+                                  Q_ARG(QRectF, imageRect),
+                                  Q_ARG(QString, labelName),
+                                  Q_ARG(QString, m_currentImagePath));
+    } else {
+        statusBar()->showMessage(QString::fromUtf8(u8"模型正在按框推理"));
+        QMetaObject::invokeMethod(m_inferenceWorker, "inferByRect", Qt::QueuedConnection,
+                                  Q_ARG(QRectF, imageRect),
+                                  Q_ARG(QString, labelName),
+                                  Q_ARG(QString, m_currentImagePath));
+    }
 }
 
 void MainWindow::onAnnotationSelectionChanged(int annotationIndex) {
@@ -815,6 +940,7 @@ void MainWindow::onSamCurrentImageFinished(const QString& imagePath, bool succes
 void MainWindow::onSamPointInferenceFinished(const SamInferResult& result, const QString& labelName,
                                              const QString& imagePath) {
     m_inferenceBusy = false;
+    updateModeControls();
     if (!result.success) {
         statusBar()->showMessage(QString::fromUtf8(u8"推理失败"));
         appendLog(QStringLiteral("[InferByPoint] %1").arg(result.errorMessage));
@@ -826,12 +952,27 @@ void MainWindow::onSamPointInferenceFinished(const SamInferResult& result, const
 void MainWindow::onSamRectInferenceFinished(const SamInferResult& result, const QString& labelName,
                                             const QString& imagePath) {
     m_inferenceBusy = false;
+    updateModeControls();
     if (!result.success) {
         statusBar()->showMessage(QString::fromUtf8(u8"推理失败"));
         appendLog(QStringLiteral("[InferByRect] %1").arg(result.errorMessage));
         return;
     }
     saveSamResultAnnotations(result, labelName, imagePath);
+}
+
+void MainWindow::onSamRectsInferenceFinished(const SamInferResult& result, const QString& labelName,
+                                             const QString& imagePath) {
+    m_inferenceBusy = false;
+    updateModeControls();
+    if (!result.success) {
+        statusBar()->showMessage(QString::fromUtf8(u8"多框推理失败"));
+        appendLog(QStringLiteral("[InferByRects] %1").arg(result.errorMessage));
+        return;
+    }
+    if (saveSamResultAnnotations(result, labelName, imagePath) && imagePath == m_currentImagePath) {
+        clearPendingMultiRects();
+    }
 }
 
 void MainWindow::setupConnections() {
@@ -849,6 +990,8 @@ void MainWindow::setupConnections() {
     connect(ui->pushButton_clearAllAnno, &QPushButton::clicked, this, &MainWindow::onClearAllAnnotationsClicked);
     connect(ui->pushButton_firstImg, &QPushButton::clicked, this, &MainWindow::onFirstImageClicked);
     connect(ui->PB_LastImg, &QPushButton::clicked, this, &MainWindow::onPreviousImageClicked);
+    connect(ui->pushButton_InferByRects, &QPushButton::clicked, this, &MainWindow::onInferByRectsClicked);
+    connect(ui->pushButton_ClearRects, &QPushButton::clicked, this, &MainWindow::onClearRectsClicked);
     connect(ui->pushButton_deleteImg, &QPushButton::clicked, this, &MainWindow::onDeleteCurrentImageClicked);
     connect(ui->pushButton_nextImg, &QPushButton::clicked, this, &MainWindow::onNextImageClicked);
     connect(ui->pushButton_finalImg, &QPushButton::clicked, this, &MainWindow::onFinalImageClicked);
@@ -859,6 +1002,8 @@ void MainWindow::setupConnections() {
     connect(ui->fixAnnotationButton, &QPushButton::clicked, this, &MainWindow::onFixAnnotationClicked);
 
     connect(ui->imageList, &QListWidget::currentRowChanged, this, &MainWindow::onImageSelectionChanged);
+    connect(ui->comboBox_AnnoMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onAnnotationModeChanged);
     connect(ui->checkBox_HideLabel, &QCheckBox::toggled, ui->imageWidget,
             &ImageAnnotateWidget::setShowAnnotationLabels);
 
@@ -943,12 +1088,13 @@ bool MainWindow::loadImageByPath(const QString& imagePath) {
 
     ui->imageWidget->setVisible(true);
     m_currentImagePath = imagePath;
+    clearPendingMultiRects();
     ui->imageWidget->clearTempResult();
-    setImageStatusText(ui->imageWidget->viewportStatusText());
 
     if (!reloadAnnotationsForCurrentImage()) {
         return false;
     }
+    syncImageStatusText();
 
     if (m_modelInitialized) {
         requestSetCurrentImageForWorker();
@@ -1024,6 +1170,7 @@ bool MainWindow::reloadAnnotationsForCurrentImage() {
     refreshAnnotationList();
 
     if (m_currentImagePath.isEmpty()) {
+        syncImageStatusText();
         updateStatusSummary();
         return true;
     }
@@ -1035,9 +1182,14 @@ bool MainWindow::reloadAnnotationsForCurrentImage() {
         return false;
     }
 
+    if (!normalizeAnnotationsForCurrentImage()) {
+        return false;
+    }
+
     updateAnnotationColors();
     ui->imageWidget->setAnnotations(m_annotations);
     refreshAnnotationList();
+    syncImageStatusText();
     updateStatusSummary();
     return true;
 }
@@ -1056,6 +1208,93 @@ void MainWindow::updateAnnotationColors() {
     for (AnnotationObject& ann : m_annotations) {
         ann.colorValue = colorForLabel(ann.label);
     }
+}
+
+QList<AnnotationObject> MainWindow::nmsAnnotations(const QList<AnnotationObject>& annotations) const {
+    QList<AnnotationObject> kept;
+    kept.reserve(annotations.size());
+
+    for (const AnnotationObject& candidate : annotations) {
+        const QRectF candidateRect = rectFromAnnotation(candidate);
+        if (!candidateRect.isValid() || candidateRect.width() <= 0.0 || candidateRect.height() <= 0.0) {
+            continue;
+        }
+
+        bool suppressed = false;
+        for (const AnnotationObject& existing : kept) {
+            if (existing.label != candidate.label) {
+                continue;
+            }
+            if (rectIou(candidateRect, rectFromAnnotation(existing)) > kNmsIouThreshold) {
+                suppressed = true;
+                break;
+            }
+        }
+
+        if (!suppressed) {
+            AnnotationObject normalized = candidate;
+            normalized.shapeIndex = kept.size();
+            normalized.rectPolygonImage = toAxisAlignedRectPolygon(candidate.rectPolygonImage);
+            kept.push_back(normalized);
+        }
+    }
+
+    return kept;
+}
+
+bool MainWindow::normalizeAnnotationsForCurrentImage() {
+    if (m_currentImagePath.isEmpty()) {
+        return true;
+    }
+
+    const int originalCount = m_annotations.size();
+    const QList<AnnotationObject> filtered = nmsAnnotations(m_annotations);
+    if (filtered.size() == originalCount) {
+        m_annotations = filtered;
+        return true;
+    }
+
+    QString error;
+    if (!AnnotationJsonIO::replaceAnnotations(m_currentImagePath, filtered, &error)) {
+        statusBar()->showMessage(QString::fromUtf8(u8"标注去重保存失败"));
+        appendLog(QStringLiteral("[AnnotationNMS] %1").arg(error));
+        return false;
+    }
+
+    m_annotations = filtered;
+    appendLog(QStringLiteral("[AnnotationNMS] removed %1 duplicate annotations")
+                  .arg(originalCount - filtered.size()));
+    return true;
+}
+
+bool MainWindow::normalizeAnnotationsForImage(const QString& imagePath) {
+    if (imagePath.isEmpty()) {
+        return true;
+    }
+    if (imagePath == m_currentImagePath) {
+        return normalizeAnnotationsForCurrentImage();
+    }
+
+    QList<AnnotationObject> annotations;
+    QString error;
+    if (!AnnotationJsonIO::loadAnnotations(imagePath, &annotations, &error)) {
+        appendLog(QStringLiteral("[AnnotationNMS] failed to load %1: %2").arg(imagePath, error));
+        return false;
+    }
+
+    const int originalCount = annotations.size();
+    const QList<AnnotationObject> filtered = nmsAnnotations(annotations);
+    if (filtered.size() == originalCount) {
+        return true;
+    }
+    if (!AnnotationJsonIO::replaceAnnotations(imagePath, filtered, &error)) {
+        appendLog(QStringLiteral("[AnnotationNMS] failed to save %1: %2").arg(imagePath, error));
+        return false;
+    }
+    appendLog(QStringLiteral("[AnnotationNMS] removed %1 duplicate annotations from %2")
+                  .arg(originalCount - filtered.size())
+                  .arg(imagePath));
+    return true;
 }
 
 void MainWindow::updateStatusSummary(const QString& message) {
@@ -1096,13 +1335,45 @@ int MainWindow::colorForLabel(const QString& label) const {
     return 0x00C8FF;
 }
 
+MainWindow::AnnotationMode MainWindow::currentAnnotationMode() const {
+    switch (ui->comboBox_AnnoMode->currentIndex()) {
+    case 1:
+        return AnnotationMode::Manual;
+    case 2:
+        return AnnotationMode::SmallTarget;
+    case 3:
+        return AnnotationMode::MultiTarget;
+    case 0:
+    default:
+        return AnnotationMode::Auto;
+    }
+}
+
 bool MainWindow::isAutoAnnotationMode() const {
-    return ui->comboBox_AnnoMode->currentIndex() == 0;
+    return currentAnnotationMode() == AnnotationMode::Auto;
+}
+
+void MainWindow::updateModeControls() {
+    const bool multiMode = currentAnnotationMode() == AnnotationMode::MultiTarget;
+    ui->pushButton_InferByRects->setEnabled(multiMode && !m_pendingMultiRects.isEmpty() && !m_inferenceBusy);
+    ui->pushButton_ClearRects->setEnabled(multiMode && !m_pendingMultiRects.isEmpty() && !m_inferenceBusy);
+}
+
+void MainWindow::clearPendingMultiRects() {
+    if (m_pendingMultiRects.isEmpty()) {
+        ui->imageWidget->clearPendingPromptRects();
+        updateModeControls();
+        return;
+    }
+    m_pendingMultiRects.clear();
+    ui->imageWidget->clearPendingPromptRects();
+    updateModeControls();
 }
 
 void MainWindow::clearCurrentImageState() {
     m_currentImagePath.clear();
     m_annotations.clear();
+    clearPendingMultiRects();
     ui->imageWidget->setAnnotations(m_annotations);
     ui->imageWidget->clearTempResult();
     ui->imageWidget->setVisible(true);
@@ -1231,6 +1502,9 @@ bool MainWindow::saveSamResultAnnotations(const SamInferResult& result, const QS
     if (targetImagePath == m_currentImagePath) {
         ui->imageWidget->clearTempResult();
         reloadAnnotationsForCurrentImage();
+    } else if (!normalizeAnnotationsForImage(targetImagePath)) {
+        statusBar()->showMessage(QString::fromUtf8(u8"保存AI标注后去重失败"));
+        return false;
     }
     statusBar()->showMessage(QString::fromUtf8(u8"AI已保存 %1 个目标").arg(newAnnotations.size()));
     appendLog(QStringLiteral("[AI SaveResult] appended %1 annotations with label %2")

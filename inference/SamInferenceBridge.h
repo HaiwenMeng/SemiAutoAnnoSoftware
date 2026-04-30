@@ -7,6 +7,7 @@
 #include <QPointF>
 #include <QRectF>
 #include <QString>
+#include <QVector>
 
 #include "inference/SamTypes.h"
 
@@ -24,9 +25,12 @@ public:
 
     SamInferResult inferByPoint(const QPointF& imagePoint, const QString& labelName);
     SamInferResult inferByRect(const QRectF& imageRect, const QString& labelName);
+    SamInferResult inferByRects(const QVector<QRectF>& imageRects, const QString& labelName);
+    SamInferResult inferSmallTargetByRect(const QRectF& imageRect, const QString& labelName);
 
 private:
     bool validateReady(SamInferResult* result) const;
+    bool restoreCurrentImage(QString* errorMessage = nullptr);
 
     bool m_initialized = false;
     QString m_currentImagePath;

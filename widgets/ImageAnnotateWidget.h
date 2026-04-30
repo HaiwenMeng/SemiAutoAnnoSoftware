@@ -5,6 +5,7 @@
 #include <QList>
 #include <QPoint>
 #include <QRect>
+#include <QVector>
 #include <QWidget>
 
 #include "app/AppTypes.h"
@@ -21,6 +22,8 @@ public:
     void clearTempResult();
     void setTempResult(const TempInferenceResult& result);
     void setAnnotations(const QList<AnnotationObject>& annotations);
+    void setPendingPromptRects(const QVector<QRectF>& rects);
+    void clearPendingPromptRects();
     void setSelectedAnnotationIndex(int index);
     void setShowAnnotationLabels(bool show);
     QString viewportStatusText() const;
@@ -53,6 +56,7 @@ private:
 
     QImage m_image;
     QList<AnnotationObject> m_annotations;
+    QVector<QRectF> m_pendingPromptRects;
     int m_selectedAnnotationIndex = -1;
     bool m_showAnnotationLabels = true;
 

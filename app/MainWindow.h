@@ -4,6 +4,7 @@
 #include <QList>
 #include <QMainWindow>
 #include <QStringList>
+#include <QVector>
 
 #include "app/AppTypes.h"
 #include "inference/SamTypes.h"
@@ -41,6 +42,9 @@ private slots:
     void onDeleteCurrentImageClicked();
     void onNextImageClicked();
     void onFinalImageClicked();
+    void onInferByRectsClicked();
+    void onClearRectsClicked();
+    void onAnnotationModeChanged(int index);
 
     void onPointPromptRequested(const QPointF& imagePoint);
     void onRectPromptRequested(const QRectF& imageRect);
@@ -50,6 +54,7 @@ private slots:
     void onSamCurrentImageFinished(const QString& imagePath, bool success, const QString& errorMessage);
     void onSamPointInferenceFinished(const SamInferResult& result, const QString& labelName, const QString& imagePath);
     void onSamRectInferenceFinished(const SamInferResult& result, const QString& labelName, const QString& imagePath);
+    void onSamRectsInferenceFinished(const SamInferResult& result, const QString& labelName, const QString& imagePath);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
@@ -67,6 +72,7 @@ private:
     void startSamInitialization(bool automatic);
     void requestSetCurrentImageForWorker();
     bool ensureModelReadyForInference();
+    void syncImageStatusText();
 
     void updateWindowTitle();
     void setWorkingDirectory(const QString& folderPath);
@@ -83,10 +89,22 @@ private:
     void setModelStatusText(const QString& text);
     void setImageStatusText(const QString& text);
     int colorForLabel(const QString& label) const;
+    enum class AnnotationMode {
+        Auto,
+        Manual,
+        SmallTarget,
+        MultiTarget
+    };
+    AnnotationMode currentAnnotationMode() const;
     bool isAutoAnnotationMode() const;
+    void updateModeControls();
+    void clearPendingMultiRects();
     void clearCurrentImageState();
     bool saveManualRectAnnotation(const QRectF& imageRect, const QString& labelName);
     QString currentSelectedLabel(QString* errorMessage = nullptr) const;
+    QList<AnnotationObject> nmsAnnotations(const QList<AnnotationObject>& annotations) const;
+    bool normalizeAnnotationsForImage(const QString& imagePath);
+    bool normalizeAnnotationsForCurrentImage();
     QList<AnnotationObject> annotationsFromSamResult(const SamInferResult& result, const QString& labelName,
                                                      QString* errorMessage = nullptr);
     bool saveSamResultAnnotations(const SamInferResult& result, const QString& labelName,
@@ -103,6 +121,7 @@ private:
     QString m_workerCurrentImagePath;
     QString m_pendingWorkerImagePath;
     QString m_labelConfigPath;
+    QVector<QRectF> m_pendingMultiRects;
 
     QList<AnnotationObject> m_annotations;
     LabelConfig m_labelConfig;

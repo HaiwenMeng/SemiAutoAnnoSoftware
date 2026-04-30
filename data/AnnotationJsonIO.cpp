@@ -240,6 +240,32 @@ bool AnnotationJsonIO::appendAnnotations(const QString& imagePath, const QList<A
     return saveRootObject(jsonPath, root, errorMessage);
 }
 
+bool AnnotationJsonIO::replaceAnnotations(const QString& imagePath, const QList<AnnotationObject>& annotations,
+                                          QString* errorMessage) {
+    const QString jsonPath = jsonPathFromImagePath(imagePath);
+
+    QJsonObject root;
+    if (!loadRootObject(jsonPath, imagePath, &root, errorMessage)) {
+        return false;
+    }
+
+    refreshImageFields(&root, imagePath);
+
+    QJsonArray shapes;
+    for (const AnnotationObject& annotation : annotations) {
+        if (annotation.label.isEmpty() || annotation.rectPolygonImage.size() != 4) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Invalid annotation in replace");
+            }
+            return false;
+        }
+        shapes.append(shapeObjectFromAnnotation(annotation));
+    }
+
+    root.insert(QStringLiteral("shapes"), shapes);
+    return saveRootObject(jsonPath, root, errorMessage);
+}
+
 bool AnnotationJsonIO::clearAnnotations(const QString& imagePath, QString* errorMessage) {
     const QString jsonPath = jsonPathFromImagePath(imagePath);
 

@@ -64,6 +64,20 @@ void ImageAnnotateWidget::setAnnotations(const QList<AnnotationObject>& annotati
         m_selectedAnnotationIndex = -1;
     }
     update();
+    emitViewportStatus();
+}
+
+void ImageAnnotateWidget::setPendingPromptRects(const QVector<QRectF>& rects) {
+    m_pendingPromptRects = rects;
+    update();
+}
+
+void ImageAnnotateWidget::clearPendingPromptRects() {
+    if (m_pendingPromptRects.isEmpty()) {
+        return;
+    }
+    m_pendingPromptRects.clear();
+    update();
 }
 
 void ImageAnnotateWidget::setSelectedAnnotationIndex(int index) {
@@ -182,6 +196,26 @@ void ImageAnnotateWidget::paintEvent(QPaintEvent* event) {
         painter.setPen(QPen(QColor(8, 11, 16), 2.0));
         painter.setBrush(QColor(98, 210, 162));
         painter.drawEllipse(p, 5.0, 5.0);
+    }
+
+    for (int i = 0; i < m_pendingPromptRects.size(); ++i) {
+        const QRectF prompt = m_pendingPromptRects.at(i).normalized();
+        const QPointF p1 = imageToWidget(prompt.topLeft());
+        const QPointF p2 = imageToWidget(prompt.bottomRight());
+        QRectF wr(p1, p2);
+        wr = wr.normalized();
+        painter.setPen(QPen(QColor(98, 210, 162), 2.0, Qt::DashLine));
+        painter.setBrush(QColor(98, 210, 162, 28));
+        painter.drawRoundedRect(wr, 3, 3);
+
+        const QString tag = QStringLiteral("R%1").arg(i + 1);
+        const QFontMetrics fm(painter.font());
+        const QRect textBounds = fm.boundingRect(tag).adjusted(-8, -3, 8, 4);
+        const QPoint textPos(static_cast<int>(qRound(wr.left())),
+                             static_cast<int>(qRound(wr.top())) - 4);
+        const QRect bgRect(textPos.x(), textPos.y() - textBounds.height(),
+                           textBounds.width(), textBounds.height());
+        drawRoundedLabel(&painter, bgRect, QColor(98, 210, 162), tag);
     }
 
     if (m_draggingRect && m_mousePressed) {
